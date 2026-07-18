@@ -1,0 +1,12 @@
+# Google GenAI ecosystem
+google-genai
+
+# Core agent orchestration framework
+langgraph
+typing-extensions
+
+# Web Dashboard Dashboard Application
+streamlit
+
+# Environment variable configuration utility
+python-dotenv
