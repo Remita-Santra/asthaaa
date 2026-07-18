@@ -69,6 +69,7 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
 
     # If audio is present, use Gemini to transcribe it natively
     # --- nodes.py ingest_node UPDATE ---
+# --- nodes.py ingest_node UPDATE ---
 if state.get("input_mode") == "audio" and audio_path and os.path.exists(audio_path):
     try:
         print(f"[Nodes] Uploading stabilized voice notes track: {audio_path}")
