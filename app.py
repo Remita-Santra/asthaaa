@@ -1,3 +1,4 @@
+# app.py
 import os
 from dotenv import load_dotenv
 
@@ -14,7 +15,71 @@ import streamlit as st
 from graph import asha_agent_graph
 import db
 
-st.set_page_config(page_title="ASHA Digital Assistant", page_icon="🩺", layout="centered")
+st.set_page_config(page_title="ASHTHA FOR ASHA", page_icon="🩺", layout="centered")
+
+# --- CUSTOM CSS FOR PINK, MAROON, AND CREAM THEME ---
+st.markdown("""
+    <style>
+        /* Base application background (Cream) and main text (Maroon) */
+        .stApp {
+            background-color: #FFFDF9;
+            color: #5A0E1A;
+        }
+        
+        /* Headers and subheaders (Deep Maroon) */
+        h1, h2, h3, h4, h5, h6, label, .stMarkdown p {
+            color: #5A0E1A !important;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        /* Container boxes styling (Creamy Pink background with Maroon border) */
+        div[data-testid="stContainerBorder"] {
+            background-color: #FFF0F2 !important;
+            border: 1px solid #C48B95 !important;
+            border-radius: 10px;
+            padding: 1.5rem;
+        }
+        
+        /* Primary Run Action Button styling (Maroon back, Pink accent on text) */
+        button[data-testid="baseButton-primary"] {
+            background-color: #5A0E1A !important;
+            color: #FFFDF9 !important;
+            border: 2px solid #5A0E1A !important;
+            border-radius: 8px !important;
+            transition: all 0.3s ease;
+        }
+        button[data-testid="baseButton-primary"]:hover {
+            background-color: #D34E65 !important;
+            color: #FFFDF9 !important;
+            border-color: #D34E65 !important;
+        }
+
+        /* Secondary actions button styling (Pink outline) */
+        button[data-testid="baseButton-secondary"] {
+            background-color: #FFFDF9 !important;
+            color: #5A0E1A !important;
+            border: 1px solid #C48B95 !important;
+        }
+        button[data-testid="baseButton-secondary"]:hover {
+            background-color: #FFF0F2 !important;
+            border-color: #5A0E1A !important;
+        }
+
+        /* Sidebar container custom overrides */
+        section[data-testid="stSidebar"] {
+            background-color: #FFF5F6 !important;
+            border-right: 1px solid #E8C1C7;
+        }
+
+        /* Info boxes (Subtle pinkish accent backdrops) */
+        .stAlert {
+            background-color: #FFF0F2 !important;
+            color: #5A0E1A !important;
+            border-left: 5px solid #D34E65 !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 
 st.title("🩺 ASHA Digital Assistant")
 st.caption("Live multimodal capture using unified voice processing, text, and image analysis.")
@@ -93,7 +158,6 @@ if muac_file is not None:
 st.divider()
 
 # --- SECTION 3: PIPELINE INVOCATION AND RESPONSE VISUALIZATION ---
-# Disable execution if worker credentials are empty strings
 button_disabled = not worker_id or not village
 
 if st.button("Analyze & Run Agent Workflow", type="primary", use_container_width=True, disabled=button_disabled):
@@ -114,7 +178,6 @@ if st.button("Analyze & Run Agent Workflow", type="primary", use_container_width
         with st.spinner("Processing speech, textual details, and vision metrics with Gemini AI..."):
             final_state = asha_agent_graph.invoke(initial_state)
             
-            # Persist successful outputs to DB mock ledger tracking
             if "risk_assessment" in final_state and "patient_type" in final_state:
                 db.save_record(
                     f"ABHA-{str(uuid.uuid4())[:8].upper()}", 
