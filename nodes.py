@@ -68,7 +68,7 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
     detected_language = "English"
 
     # If audio is present, use Gemini to transcribe it natively
-if state.get("input_mode") == "audio" and audio_path and os.path.exists(audio_path):
+    if state.get("input_mode") == "audio" and audio_path and os.path.exists(audio_path):
         try:
             print(f"[Nodes] Processing live audio track: {audio_path}")
             uploaded_audio = client.files.upload(file=audio_path)
@@ -95,7 +95,6 @@ if state.get("input_mode") == "audio" and audio_path and os.path.exists(audio_pa
         except Exception as e:
             errors.append(f"Audio processing error: {str(e)}")
             translated_en = "Audio processing failed."
-   
     else:
         # If text is typed, use a quick LLM call to translate it to English if needed
         if raw_text:
