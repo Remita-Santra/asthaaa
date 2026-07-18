@@ -128,8 +128,10 @@ with st.sidebar:
 st.markdown("### 📝 Patient Case Capture")
 mode = st.radio("Input method for case description", ["Type note manually", "Record live voice note"], horizontal=True)
 
+# 🚀 SAFEGUARD: Initialize variables cleanly at the root block level
 raw_text = ""
 audio_path = None
+muac_image_path = None  # Prevents line 173 compilation NameError crashes completely
 
 if mode == "Type note manually":
     raw_text = st.text_area(
@@ -153,7 +155,18 @@ else:
         audio_path = stable_audio_path
         st.audio(st.session_state["cached_audio_bytes"], format="audio/wav")
 
+# --- ADDED CHANGE: CAMERA SCANNING COMPONENT FOR MUAC ---
+st.markdown("### 📸 MUAC Band Image Capture (Optional)")
+enable_camera = st.checkbox("Toggle Child Malnutrition Scanner")
 
+if enable_camera:
+    img_file = st.camera_input("Position the MUAC band clearly in frame")
+    if img_file is not None:
+        tmp_dir = tempfile.gettempdir()
+        stable_img_path = os.path.join(tmp_dir, "muac_snapshot.jpg")
+        with open(stable_img_path, "wb") as f:
+            f.write(img_file.getbuffer())
+        muac_image_path = stable_img_path
 
 
 # --- SECTION 3: PIPELINE INVOCATION AND RESPONSE VISUALIZATION ---
