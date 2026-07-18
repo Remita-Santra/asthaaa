@@ -68,44 +68,34 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
     detected_language = "English"
 
     # If audio is present, use Gemini to transcribe it natively
-    # --- nodes.py ingest_node UPDATE ---
-# --- nodes.py ingest_node UPDATE ---
 if state.get("input_mode") == "audio" and audio_path and os.path.exists(audio_path):
-    try:
-        print(f"[Nodes] Uploading stabilized voice notes track: {audio_path}")
-        
-        # Explicitly define the audio standard MIME payload parameter
-        uploaded_audio = client.files.upload(
-            file=audio_path,
-            config=types.UploadFileConfig(mime_type="audio/wav")
-        )
-        
-        # Pool status explicitly before executing content extraction layers
-        while uploaded_audio.state.name == "PROCESSING":
-            time.sleep(1)
-            uploaded_audio = client.files.get(name=uploaded_audio.name)
+        try:
+            print(f"[Nodes] Processing live audio track: {audio_path}")
+            uploaded_audio = client.files.upload(file=audio_path)
             
-        if uploaded_audio.state.name == "FAILED":
-            raise Exception("Google API processing layer failed to decode file structure.")
-
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[
-                "Transcribe this voice note spoken by a community health worker. "
-                "Provide the output translated completely into standard English.", 
-                uploaded_audio
-            ]
-        )
-        translated_en = response.text.strip()
-        detected_language = "Detected from Audio"
-        
-        # Remove deletion or introduce short buffer sleep to avoid server side clipping
-        time.sleep(0.5) 
-        client.files.delete(name=uploaded_audio.name)
-        
-    except Exception as e:
-        errors.append(f"Audio processing error: {str(e)}")
-        translated_en = f"Audio processing failed runtime tracking: {str(e)}"
+            # Wait for processing if the file takes time to compile
+            while uploaded_audio.state.name == "PROCESSING":
+                time.sleep(1)
+                uploaded_audio = client.files.get(name=uploaded_audio.name)
+            
+            # Request direct translation/transcription 
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
+                    "Transcribe this voice note spoken by a community health worker. "
+                    "Provide the output translated completely into standard English.", 
+                    uploaded_audio
+                ]
+            )
+            translated_en = response.text.strip()
+            detected_language = "Detected from Audio"
+            
+            # Cleanup File from API
+            client.files.delete(name=uploaded_audio.name)
+        except Exception as e:
+            errors.append(f"Audio processing error: {str(e)}")
+            translated_en = "Audio processing failed."
+   
     else:
         # If text is typed, use a quick LLM call to translate it to English if needed
         if raw_text:
