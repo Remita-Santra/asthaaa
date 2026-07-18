@@ -1,11 +1,3 @@
-import os
-import json
-import time
-from typing import Dict, Any
-from google import genai
-from google.genai import types
-from state import ASHAAgentState
-
 # nodes.py
 import os
 import json
@@ -13,7 +5,7 @@ import time
 from typing import Dict, Any
 from dotenv import load_dotenv
 
-# Force load_dotenv to look in the exact directory of this specific file
+# 1. Force explicit environment variable loading from the project directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
 env_path = os.path.join(current_dir, '.env')
 load_dotenv(dotenv_path=env_path) 
@@ -22,38 +14,17 @@ from google import genai
 from google.genai import types
 from state import ASHAAgentState
 
-# Fallback check: If environment lookup still fails, read it or pass it directly
+# 2. Fallback check: Read key from environment variables
 api_key = os.getenv("GEMINI_API_KEY")
 
 if not api_key:
-    # ⚠️ TEMPORARY SAFEGUARD: If your .env file is completely broken or unreadable,
-    # you can paste your key directly here to get unblocked right away:
+    # ⚠️ SAFEGUARD: If your .env file is completely missing or unreadable,
+    # you can paste your key string directly below:
     api_key = "AIzaSy..." 
 
-# Initialize the client explicitly passing your key variable
+# 3. Initialize the unified GenAI Client precisely once
 client = genai.Client(api_key=api_key)
 
-# nodes.py
-import os
-import json
-import time
-from typing import Dict, Any
-from dotenv import load_dotenv
-
-# Initialize environment config variables
-load_dotenv()  # 👈 ENSURES THE KEY IS LOADED DIRECTLY FOR THE GENAI ENGINE
-
-from google import genai
-from google.genai import types
-from state import ASHAAgentState
-
-# The unified client can now read the injected variable seamlessly
-client = genai.Client()
-
-# ... Rest of your nodes.py code remains exactly the same ...
-
-# Initialize the unified GenAI Client (Picks up GEMINI_API_KEY from environment)
-client = genai.Client()
 
 def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
     """
@@ -67,18 +38,25 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
     translated_en = ""
     detected_language = "English"
 
-    # If audio is present, use Gemini to transcribe it natively
+    # --- nodes.py ingest_node UPDATE ---
     if state.get("input_mode") == "audio" and audio_path and os.path.exists(audio_path):
         try:
-            print(f"[Nodes] Processing live audio track: {audio_path}")
-            uploaded_audio = client.files.upload(file=audio_path)
+            print(f"[Nodes] Uploading stabilized voice notes track: {audio_path}")
             
-            # Wait for processing if the file takes time to compile
+            # Explicitly define the audio standard MIME payload parameter
+            uploaded_audio = client.files.upload(
+                file=audio_path,
+                config=types.UploadFileConfig(mime_type="audio/wav")
+            )
+            
+            # Pool status explicitly before executing content extraction layers
             while uploaded_audio.state.name == "PROCESSING":
                 time.sleep(1)
                 uploaded_audio = client.files.get(name=uploaded_audio.name)
-            
-            # Request direct translation/transcription 
+                
+            if uploaded_audio.state.name == "FAILED":
+                raise Exception("Google API processing layer failed to decode file structure.")
+
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=[
@@ -90,11 +68,14 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
             translated_en = response.text.strip()
             detected_language = "Detected from Audio"
             
-            # Cleanup File from API
+            # Remove deletion or introduce short buffer sleep to avoid server side clipping
+            time.sleep(0.5) 
             client.files.delete(name=uploaded_audio.name)
+            
         except Exception as e:
             errors.append(f"Audio processing error: {str(e)}")
-            translated_en = "Audio processing failed."
+            translated_en = f"Audio processing failed runtime tracking: {str(e)}"
+   
     else:
         # If text is typed, use a quick LLM call to translate it to English if needed
         if raw_text:
