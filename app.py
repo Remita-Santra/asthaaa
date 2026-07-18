@@ -81,7 +81,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-st.title("🩺 ASHA Digital Assistant")
+st.title("ASHTHA FOR ASHA")
 st.caption("Live multimodal capture using unified voice processing, text, and image analysis.")
 
 # --- SECTION 1: USER INPUT FOR WORKER DETAILS ---
