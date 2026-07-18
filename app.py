@@ -124,8 +124,8 @@ with st.sidebar:
         st.caption("No historical records fetched for this session.")
 
 # --- SECTION 2: PATIENT CASE ENCOUNTER DATA ENTRY ---
-st.markdown("### 📝 Patient Case Capture")
 
+st.markdown("### 📝 Patient Case Capture")
 mode = st.radio("Input method for case description", ["Type note manually", "Record live voice note"], horizontal=True)
 
 raw_text = ""
@@ -133,29 +133,28 @@ audio_path = None
 
 if mode == "Type note manually":
     raw_text = st.text_area(
-        "Observation Notes (Mixing regional words/Hindi with English is perfectly supported)",
+        "Observation Notes",
         placeholder="e.g. Garbhwati mahila, age 28, severe headache, BP 145/95, hemoglobin 9.5 hai",
         height=100,
     )
 else:
     audio_file = st.audio_input("Tap microphone to record patient vocal symptoms")
+    
+    # Cache the file inside session state so it doesn't vanish on click reruns
     if audio_file is not None:
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-        tmp.write(audio_file.read())
-        tmp.close()
-        audio_path = tmp.name
+        st.session_state["cached_audio_bytes"] = audio_file.read()
+        
+    if "cached_audio_bytes" in st.session_state:
+        # Create a stable file that lasts through processing execution boundaries
+        tmp_dir = tempfile.gettempdir()
+        stable_audio_path = os.path.join(tmp_dir, "asha_live_speech.wav")
+        with open(stable_audio_path, "wb") as f:
+            f.write(st.session_state["cached_audio_bytes"])
+        audio_path = stable_audio_path
+        st.audio(st.session_state["cached_audio_bytes"], format="audio/wav")
 
-st.markdown("### 📸 Clinical Image Capture (Optional)")
-muac_file = st.camera_input("Line up the child's MUAC tape boundary markers in the viewfinder")
-muac_image_path = None
 
-if muac_file is not None:
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    tmp.write(muac_file.read())
-    tmp.close()
-    muac_image_path = tmp.name
 
-st.divider()
 
 # --- SECTION 3: PIPELINE INVOCATION AND RESPONSE VISUALIZATION ---
 button_disabled = not worker_id or not village
