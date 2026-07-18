@@ -24,8 +24,8 @@ import db
 
 st.set_page_config(page_title="ASHA Digital Assistant", page_icon="🩺", layout="centered")
 
-st.title("🩺 ASHA Digital Assistant")
-st.caption("Live multimodal capture using unified audio processing and image analysis.")
+st.title("🩺 ASHTHA FOR ASHA ")
+st.caption("Your very owm Digital Assistant!")
 
 with st.sidebar:
     st.header("Worker details")
