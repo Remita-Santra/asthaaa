@@ -57,11 +57,20 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
             if uploaded_audio.state.name == "FAILED":
                 raise Exception("Google API processing layer failed to decode file structure.")
 
+            # Optimized Prompt to fix incorrect voice evaluations and translations
+            transcription_prompt = (
+                "You are an expert medical transcriptionist and translator working with rural community health systems. "
+                "Examine this voice note spoken by an ASHA worker carefully. "
+                "1. Transcribe the raw text accurately, paying close attention to vital numerical indicators (e.g., blood pressure numbers like 140/90, age, hemoglobin counts, weights). "
+                "2. The recording contains mixed Hindi and English clinical phrases (Hinglish), e.g., 'sar dard hai', 'hemoglobin 9.5 hai', 'blood pressure badha hai'. "
+                "3. Provide the final output translated completely and seamlessly into clear, standard clinical English. "
+                "Do not add conversational commentary or summaries; output only the high-accuracy translation."
+            )
+
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=[
-                    "Transcribe this voice note spoken by a community health worker. "
-                    "Provide the output translated completely into standard English.", 
+                    transcription_prompt, 
                     uploaded_audio
                 ]
             )
