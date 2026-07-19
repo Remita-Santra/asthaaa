@@ -66,8 +66,6 @@ def run_agent_loop():
             print(f"❌ An error occurred during execution: {e}")
 
 if __name__ == "__main__":
-    # Ensure your API Key is set in your environment variables
-    #export api_key="AQ.Ab8RN6KYXCk_RuNkU-4C9PcGoAs5Z9tCmRk2103tBbaOfYHr5w"
     if "GEMINI_API_KEY" not in os.environ:
         print("⚠️ Warning: GEMINI_API_KEY environment variable not detected.")
     run_agent_loop()
