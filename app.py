@@ -21,8 +21,7 @@ def _clean_api_key(raw_key):
 
 api_key = _clean_api_key(os.environ.get("GEMINI_API_KEY"))
 if not api_key:
-    # st.secrets raises StreamlitSecretNotFoundError (not just a missing
-    # key) when no secrets.toml exists at all, so this must be guarded.
+   
     try:
         api_key = _clean_api_key(st.secrets.get("GEMINI_API_KEY"))
     except Exception:
@@ -35,11 +34,7 @@ if not api_key:
 # Import the Google GenAI module safely
 from google import genai
 
-# vertexai=False is explicit: if GOOGLE_GENAI_USE_VERTEXAI happens to be set
-# to true anywhere in this environment, the SDK will otherwise silently try
-# to authenticate via Vertex AI (OAuth/ADC) instead of this API key, which
-# produces a 401 "ACCESS_TOKEN_TYPE_UNSUPPORTED / Expected OAuth 2 access
-# token" error identically on every call — exactly the symptom this app hit.
+
 client = genai.Client(api_key=api_key, vertexai=False)
 
 
