@@ -49,7 +49,7 @@ def _verify_gemini_credentials(key_fingerprint: str):
     """
     try:
         client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-2.0-flash",
             contents="ping",
         )
         return True, None
