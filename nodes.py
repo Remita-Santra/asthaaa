@@ -10,7 +10,7 @@ from google.genai import types
 from state import ASHAAgentState
 
 # 2. Fallback check: Read key from environment variables
-api_key = os.environ.get("GEMINI_API_KEY")
+api_key = os.env.get("GEMINI_API_KEY")
 
 if not api_key:
     raise ValueError("Missing key!")
