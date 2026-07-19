@@ -54,12 +54,16 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
             if uploaded_audio.state.name == "FAILED":
                 raise Exception("Google API processing layer failed to decode file structure.")
 
+            # OPTIMIZATION 3: Few-shot audio stabilization mapping template
             transcription_prompt = (
-                "You are an expert medical transcriptionist and translator working with rural community health systems. "
-                "Examine this voice note spoken by an ASHA worker carefully. "
-                "1. Transcribe the raw text accurately, paying close attention to vital numerical indicators, patient fields, and data counts. "
-                "2. The recording contains mixed Hindi and English clinical phrases (Hinglish). "
-                "3. Provide the final output translated completely and seamlessly into clear, standard clinical English. "
+                "You are an elite clinical transcriptionist tracking rural public health data.\n"
+                "Convert mixed audio descriptions into explicit, flat, translated clinical facts.\n\n"
+                "EXAMPLES:\n"
+                "- Spoken: 'Maternal health report, sister ka hemoglobin level 9.5 hai aur bp bahut high hai, 150 over 95'\n"
+                "  Output: 'Maternal profile case indicator: Patient has a low hemoglobin level tracking at 9.5 g/dL and high blood pressure registering at 150/95 mmHg.'\n"
+                "- Spoken: 'Child vaccination camp done, teen bache mobilized and we distributed 4 ORS packets'\n"
+                "  Output: 'Activity log reporting execution: 3 children mobilized for immunization services, 4 ORS replacement kit pieces consumed.'\n\n"
+                "Maintain raw numerical figures with precise decimals. Convert everything into clinical English. "
                 "Do not add conversational commentary or summaries; output only the high-accuracy translation."
             )
 
@@ -114,76 +118,112 @@ def extract_vitals_node(state: ASHAAgentState) -> Dict[str, Any]:
     Analyze this English medical/community note and extract patient metadata, variables, and logs into a clean JSON format.
     
     Note: "{translated_text}"
-    
-    Respond STRICTLY with a valid JSON object matching this structure exactly. Populate unmentioned fields as null or empty arrays:
-    {{
-        "primary_domain": "MATERNAL_HEALTH" or "CHILD_HEALTH" or "VITAL_EVENTS" or "DISEASE_SCREENING" or "COMMUNITY_DEMOGRAPHICS" or "DRUG_SUPPLIES" or "WORK_LOGS",
-        "maternal_health": {{
-            "is_pregnant": boolean or null,
-            "anc_checkup_count": integer or null,
-            "institutional_delivery": boolean or null,
-            "postpartum_care_received": boolean or null,
-            "gestational_age_weeks": integer or null,
-            "systolic_bp": integer or null,
-            "diastolic_bp": integer or null,
-            "hemoglobin": float or null
-        }},
-        "child_health_immunization": {{
-            "has_birth_record": boolean or null,
-            "immunizations_given": ["list", "of", "vaccines"],
-            "birth_weight_kg": float or null,
-            "breastfeeding_progress_status": "EXCLUSIVE" or "PARTIAL" or "ISSUES" or null
-        }},
-        "vital_events": {{
-            "is_birth_event": boolean or null,
-            "is_death_event": boolean or null,
-            "infant_child_mortality_flag": boolean or null,
-            "demographic_notes": string or null
-        }},
-        "disease_screening": {{
-            "communicable_symptoms": ["malaria", "leprosy", "tuberculosis", "etc"],
-            "ncd_screening_results": string or null,
-            "requires_immediate_isolation": boolean or null
-        }},
-        "community_demographics": {{
-            "eligible_family_planning_couple": boolean or null,
-            "malnourished_child_flag": boolean or null,
-            "targeted_nutritional_support_required": boolean or null
-        }},
-        "drug_supplies_services": {{
-            "items_consumed": [
-                {{"item_name": "ORS", "quantity": 2}},
-                {{"item_name": "IFA_tablets", "quantity": 30}},
-                {{"item_name": "contraceptives", "quantity": 5}}
-            ]
-        }},
-        "work_logs": {{
-            "activity_description": string or null,
-            "performance_incentive_eligible": boolean or null,
-            "children_mobilized_count": integer or null
-        }}
-    }}
     """
+    
+    # OPTIMIZATION 1: Native Structural JSON Validation Schema Layer
+    response_schema = {
+        "type": "OBJECT",
+        "properties": {
+            "primary_domain": {
+                "type": "STRING",
+                "enum": ["MATERNAL_HEALTH", "CHILD_HEALTH", "VITAL_EVENTS", "DISEASE_SCREENING", "COMMUNITY_DEMOGRAPHICS", "DRUG_SUPPLIES", "WORK_LOGS"]
+            },
+            "maternal_health": {
+                "type": "OBJECT",
+                "properties": {
+                    "is_pregnant": {"type": "BOOLEAN"},
+                    "anc_checkup_count": {"type": "INTEGER"},
+                    "institutional_delivery": {"type": "BOOLEAN"},
+                    "postpartum_care_received": {"type": "BOOLEAN"},
+                    "gestational_age_weeks": {"type": "INTEGER"},
+                    "systolic_bp": {"type": "INTEGER"},
+                    "diastolic_bp": {"type": "INTEGER"},
+                    "hemoglobin": {"type": "NUMBER"}
+                }
+            },
+            "child_health_immunization": {
+                "type": "OBJECT",
+                "properties": {
+                    "has_birth_record": {"type": "BOOLEAN"},
+                    "immunizations_given": {"type": "ARRAY", "items": {"type": "STRING"}},
+                    "birth_weight_kg": {"type": "NUMBER"},
+                    "breastfeeding_progress_status": {"type": "STRING", "enum": ["EXCLUSIVE", "PARTIAL", "ISSUES"]}
+                }
+            },
+            "vital_events": {
+                "type": "OBJECT",
+                "properties": {
+                    "is_birth_event": {"type": "BOOLEAN"},
+                    "is_death_event": {"type": "BOOLEAN"},
+                    "infant_child_mortality_flag": {"type": "BOOLEAN"},
+                    "demographic_notes": {"type": "STRING"}
+                }
+            },
+            "disease_screening": {
+                "type": "OBJECT",
+                "properties": {
+                    "communicable_symptoms": {"type": "ARRAY", "items": {"type": "STRING"}},
+                    "ncd_screening_results": {"type": "STRING"},
+                    "requires_immediate_isolation": {"type": "BOOLEAN"}
+                }
+            },
+            "community_demographics": {
+                "type": "OBJECT",
+                "properties": {
+                    "eligible_family_planning_couple": {"type": "BOOLEAN"},
+                    "malnourished_child_flag": {"type": "BOOLEAN"},
+                    "targeted_nutritional_support_required": {"type": "BOOLEAN"}
+                }
+            },
+            "drug_supplies_services": {
+                "type": "OBJECT",
+                "properties": {
+                    "items_consumed": {
+                        "type": "ARRAY",
+                        "items": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "item_name": {"type": "STRING"},
+                                "quantity": {"type": "INTEGER"}
+                            }
+                        }
+                    }
+                }
+            },
+            "work_logs": {
+                "type": "OBJECT",
+                "properties": {
+                    "activity_description": {"type": "STRING"},
+                    "performance_incentive_eligible": {"type": "BOOLEAN"},
+                    "children_mobilized_count": {"type": "INTEGER"}
+                }
+            }
+        },
+        "required": [
+            "primary_domain", "maternal_health", "child_health_immunization", 
+            "vital_events", "disease_screening", "community_demographics", 
+            "drug_supplies_services", "work_logs"
+        ]
+    }
     
     try:
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
-                response_mime_type="application/json"
+                response_mime_type="application/json",
+                response_schema=response_schema
             )
         )
         extracted_data = json.loads(response.text.strip())
     except Exception as e:
         errors.append(f"Structured domain extraction failed: {str(e)}")
-        # Fallback empty structure matching schema
         extracted_data = {
             "primary_domain": "WORK_LOGS",
             "maternal_health": {}, "child_health_immunization": {}, "vital_events": {},
             "disease_screening": {}, "community_demographics": {}, "drug_supplies_services": {}, "work_logs": {}
         }
         
-    # Contextual type adjustments based on edge case context
     if state.get("muac_image_path"):
         extracted_data["primary_domain"] = "CHILD_HEALTH"
         if not extracted_data.get("community_demographics"):
@@ -268,7 +308,10 @@ def maternal_risk_node(state: ASHAAgentState) -> Dict[str, Any]:
 
 
 def triage_node(state: ASHAAgentState) -> Dict[str, Any]:
-    """Consolidates cross-domain fields and clinical observations into a high-level triage ranking."""
+    """
+    OPTIMIZATION 2: Advanced Multi-Domain Triage Matrix
+    Consolidates cross-domain fields and clinical observations into a high-level triage ranking.
+    """
     metadata = state.get("unified_metadata", {}) or {}
     maternal = state.get("maternal_risk_result") or {}
     muac = state.get("muac_result") or {}
@@ -285,27 +328,46 @@ def triage_node(state: ASHAAgentState) -> Dict[str, Any]:
     muac_class = muac.get("classification", "NORMAL")
     if "SAM" in muac_class:
         risk_level = "URGENT_REFERRAL"
-        reasons.append("Severe Acute Malnutrition (SAM) confirmed by image processing.")
+        reasons.append("Severe Acute Malnutrition (SAM) confirmed via visual measurement tool.")
     elif "MAM" in muac_class:
-        if risk_level != "HIGH" and risk_level != "URGENT_REFERRAL":
+        if risk_level not in ["HIGH", "URGENT_REFERRAL"]:
             risk_level = "MODERATE"
-        reasons.append("Moderate Acute Malnutrition (MAM) detected via image processing.")
+        reasons.append("Moderate Acute Malnutrition (MAM) detected.")
         
-    # 3. Evaluate Disease and Screening Signals
+    # 3. Evaluate Critical Vital Incidents
+    vitals = metadata.get("vital_events", {}) or {}
+    if vitals.get("infant_child_mortality_flag") is True:
+        risk_level = "URGENT_REFERRAL"
+        reasons.append("CRITICAL INCIDENT: Local infant/child mortality tracking event reported.")
+        
+    # 4. Evaluate Disease and Screening Signals
     screening = metadata.get("disease_screening", {}) or {}
-    if screening.get("communicable_symptoms"):
-        risk_level = "HIGH"
+    if screening.get("requires_immediate_isolation") is True:
+        risk_level = "URGENT_REFERRAL"
+        reasons.append("DISEASE RISK: Symptom footprint flags immediate isolation warning.")
+    elif screening.get("communicable_symptoms"):
+        if risk_level != "URGENT_REFERRAL":
+            risk_level = "HIGH"
         syms = ", ".join(screening.get("communicable_symptoms", []))
         reasons.append(f"Communicable disease indicators flagged: {syms}")
         
-    # 4. Evaluate Vital Incident Signals
-    vitals = metadata.get("vital_events", {}) or {}
-    if vitals.get("infant_child_mortality_flag"):
-        risk_level = "URGENT_REFERRAL"
-        reasons.append("Critical vital incident record: Child mortality tracking event reported.")
+    # 5. Evaluate Community Demographics (Cohort Fallbacks)
+    demographics = metadata.get("community_demographics", {}) or {}
+    if demographics.get("targeted_nutritional_support_required") is True:
+        if risk_level == "LOW":
+            risk_level = "MODERATE"
+        reasons.append("High-risk community cohort requires targeted nutrition tracking.")
+
+    # 6. Evaluate Drug Supplies Consumption Logs
+    drugs = metadata.get("drug_supplies_services", {}) or {}
+    for item in drugs.get("items_consumed", []):
+        if item.get("item_name") == "ORS" and item.get("quantity", 0) > 5:
+            if risk_level == "LOW":
+                risk_level = "MODERATE"
+            reasons.append("High volume diarrhea mitigation items distributed.")
 
     if not reasons:
-        reasons.append("All inputs parsed successfully and fall within standard parameters.")
+        reasons.append("Record successfully processed. Indicators fall within normal parameters.")
         
     return {"risk_assessment": {"risk_level": risk_level, "reasons": reasons}}
 
