@@ -155,7 +155,6 @@ with st.container(border=True):
     else:
         st.success(f"Verified Session: Active log session for Worker {worker_id} at {village}.")
 
-# Sidebar panel
 with st.sidebar:
     st.header("Sync History Log")
     if st.button("Refresh Historical Records", type="secondary"):
@@ -164,24 +163,36 @@ with st.sidebar:
     records = st.session_state.get("records", [])
     if records:
         for rec in records:
-            # 1. Safely handle the risk assessment JSON or Dict parsing
             raw_risk = rec.get('risk_assessment')
             risk_level = "—"
             
+            # 1. Handle if it's already a native dict/list
             if isinstance(raw_risk, dict):
                 risk_level = raw_risk.get('risk_level', '—')
+            elif isinstance(raw_risk, list) and raw_risk:
+                # If it's a list, look inside the first element if it's a dict
+                first_item = raw_risk[0]
+                risk_level = first_item.get('risk_level', '—') if isinstance(first_item, dict) else '—'
+                
+            # 2. Handle if it's stored as a JSON string
             elif isinstance(raw_risk, str) and raw_risk.strip():
                 try:
                     parsed_risk = json.loads(raw_risk)
-                    risk_level = parsed_risk.get('risk_level', '—')
+                    
+                    if isinstance(parsed_risk, dict):
+                        risk_level = parsed_risk.get('risk_level', '—')
+                    elif isinstance(parsed_risk, list) and parsed_risk:
+                        # Safely unpack the first element out of the parsed list
+                        first_item = parsed_risk[0]
+                        risk_level = first_item.get('risk_level', '—') if isinstance(first_item, dict) else '—'
                 except json.JSONDecodeError:
                     risk_level = "—"
             
-            # 2. Render cleanly inside the f-string without inline logic jams
+            # 3. Render output cleanly
             st.write(f"**{rec.get('abha_ref', 'N/A')}** · {rec.get('patient_type', 'Unknown')} · {risk_level}")
     else:
         st.caption("No historical records fetched for this session.")
-
+        
 # --- SECTION 2: PATIENT CASE ENCOUNTER DATA ENTRY ---
 st.markdown("### 📝 Patient Case Capture")
 mode = st.radio("Input method for case description", ["Type note manually", "Record live voice note"], horizontal=True)
