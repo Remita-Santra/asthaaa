@@ -1,0 +1,2 @@
+env: 
+  api_key: ${{secrets.GEMINI_API_KEY}}
