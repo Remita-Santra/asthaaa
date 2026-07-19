@@ -2,10 +2,13 @@
 import os
 from dotenv import load_dotenv
 
-# 1. Force explicit environment variable mapping from your local config file
-current_dir = os.path.dirname(os.path.abspath(__file__))
-env_path = os.path.join(current_dir, '.env')
-load_dotenv(dotenv_path=env_path)
+api_key = os.emviron.get("GEMINI_API_KEY")
+
+if not api_key:
+    raise ValueError("Missing key!")
+# 3. Initialize the unified GenAI Client precisely once
+client = genai.Client(api_key=api_key)
+
 
 import json
 import uuid
