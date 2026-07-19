@@ -128,26 +128,23 @@ with st.sidebar:
 st.markdown("### 📝 Patient Case Capture")
 mode = st.radio("Input method for case description", ["Type note manually", "Record live voice note"], horizontal=True)
 
-# 🚀 SAFEGUARD: Initialize variables cleanly at the root block level
 raw_text = ""
 audio_path = None
-muac_image_path = None  # Prevents line 173 compilation NameError crashes completely
+muac_image_path = None  
 
 if mode == "Type note manually":
     raw_text = st.text_area(
         "Observation Notes",
-        placeholder="e.g. Garbhwati mahila, age 28, severe headache, BP 145/95, hemoglobin 9.5 hai",
+        placeholder="e.g. Pregnant woman with high fever, missing ANC checkup, took 2 ORS kits from the drug log.",
         height=100,
     )
 else:
     audio_file = st.audio_input("Tap microphone to record patient vocal symptoms")
     
-    # Cache the file inside session state so it doesn't vanish on click reruns
     if audio_file is not None:
         st.session_state["cached_audio_bytes"] = audio_file.read()
         
     if "cached_audio_bytes" in st.session_state:
-        # Create a stable file that lasts through processing execution boundaries
         tmp_dir = tempfile.gettempdir()
         stable_audio_path = os.path.join(tmp_dir, "asha_live_speech.wav")
         with open(stable_audio_path, "wb") as f:
@@ -155,7 +152,7 @@ else:
         audio_path = stable_audio_path
         st.audio(st.session_state["cached_audio_bytes"], format="audio/wav")
 
-# --- ADDED CHANGE: CAMERA SCANNING COMPONENT FOR MUAC ---
+# --- CAMERA SCANNING COMPONENT FOR MUAC ---
 st.markdown("### 📸 MUAC Band Image Capture (Optional)")
 enable_camera = st.checkbox("Toggle Child Malnutrition Scanner")
 
@@ -191,10 +188,11 @@ if st.button("Analyze & Run Agent Workflow", type="primary", use_container_width
             final_state = asha_agent_graph.invoke(initial_state)
             
             if "risk_assessment" in final_state and "patient_type" in final_state:
+                # Format to persist triage record safely
                 db.save_record(
                     f"ABHA-{str(uuid.uuid4())[:8].upper()}", 
                     final_state["patient_type"], 
-                    final_state["risk_assessment"]
+                    json.dumps(final_state["risk_assessment"]) if isinstance(final_state["risk_assessment"], dict) else final_state["risk_assessment"]
                 )
                 
         st.session_state["last_result"] = final_state
@@ -227,15 +225,19 @@ if result:
         with st.expander("🔍 Diagnostics: Extracted Text Risk Markers"):
             st.json(result["maternal_risk_result"])
 
+    # --- UPDATED: Render the full expanded 7-domain data payload payload structure ---
     with st.expander("🗂️ Unified Patient Metadata (ABHA System Output Payload)"):
-        st.json({
-            "managed_by_worker": result.get("asha_worker_id"),
-            "registered_village": result.get("village"),
-            "detected_language": result.get("detected_language"),
-            "translated_text_en": result.get("translated_text_en"),
-            "extracted_vitals": result.get("extracted_vitals"),
-            "abha_sync_status": result.get("abha_sync_status"),
-        })
+        metadata_payload = {
+            "administrative_metadata": {
+                "managed_by_worker": result.get("asha_worker_id"),
+                "registered_village": result.get("village"),
+                "detected_language": result.get("detected_language"),
+                "translated_text_en": result.get("translated_text_en"),
+                "abha_sync_status": result.get("abha_sync_status")
+            },
+            "extracted_multi_domain_records": result.get("unified_metadata", {})
+        }
+        st.json(metadata_payload)
 
     if result.get("errors"):
         with st.expander("⚠️ Backend Execution Warning Logs"):
