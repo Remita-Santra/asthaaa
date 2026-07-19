@@ -20,8 +20,7 @@ api_key = os.getenv("GEMINI_API_KEY")
 if not api_key:
     # ⚠️ SAFEGUARD: If your .env file is completely missing or unreadable,
     # you can paste your key string directly below:
-    api_key = "AQ.Ab8RN6KYXCk_RuNkU-4C9PcGoAs5Z9tCmRk2103tBbaOfYHr5w" 
-
+    return 
 # 3. Initialize the unified GenAI Client precisely once
 client = genai.Client(api_key=api_key)
 
@@ -114,11 +113,10 @@ def extract_vitals_node(state: ASHAAgentState) -> Dict[str, Any]:
     translated_text = state.get("translated_text_en", "")
     errors = list(state.get("errors", []))
     
-    prompt = f """
+    prompt = f"""
     Analyze this English medical/community note and extract patient metadata, variables, and logs into a clean JSON format.
     Note: "{translated_text}" 
     """
-    
     #OPTIMIZATION 1: Native Structural JSON Validation Schema Layer
     
     response_schema = {
