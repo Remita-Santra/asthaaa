@@ -13,19 +13,51 @@ from google import genai
 from google.genai import types
 from state import ASHAAgentState
 
-api_key = os.getenv("GEMINI_API_KEY")
+def _clean_api_key(raw_key):
+    """
+    Strip whitespace and accidental wrapping quotes from an API key.
+    A key like ' "AIzaSy...." \\n' (stray quotes/newline from a copy-paste
+    into .env) is a common cause of auth calls silently failing.
+    """
+    if not raw_key:
+        return raw_key
+    cleaned = raw_key.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in ("'", '"'):
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
+
+
+api_key = _clean_api_key(os.getenv("GEMINI_API_KEY"))
 if not api_key:
     # Attempt fallback check to local configuration engines
     try:
         import streamlit as st
-        api_key = st.secrets.get("GEMINI_API_KEY")
+        api_key = _clean_api_key(st.secrets.get("GEMINI_API_KEY"))
     except Exception:
         pass
 
 if not api_key:
     raise ValueError("System failure: GEMINI_API_KEY could not be resolved by the engine layers.")
 
-client = genai.Client(api_key=api_key)
+if not api_key.startswith("AIza"):
+    print(
+        "[Nodes] WARNING: GEMINI_API_KEY does not look like a typical Google AI "
+        "Studio key (these usually start with 'AIza'). If you're seeing "
+        "'ACCESS_TOKEN_TYPE_UNSUPPORTED' / 401 errors, double-check this is an "
+        "API key from https://aistudio.google.com/apikey and not an OAuth "
+        "client ID/secret or a Vertex AI service-account value."
+    )
+
+# vertexai=False is explicit and intentional: the google-genai SDK will
+# silently switch to Vertex AI mode (which requires OAuth/ADC credentials,
+# NOT a plain API key) if the GOOGLE_GENAI_USE_VERTEXAI environment variable
+# happens to be set to true anywhere in this environment — even though an
+# api_key is still passed here. That mismatch produces exactly the
+# "Expected OAuth 2 access token... ACCESS_TOKEN_TYPE_UNSUPPORTED" 401 error,
+# identically on every single call, which matches this app's symptom. Forcing
+# vertexai=False here guarantees Developer-API (API-key) auth regardless of
+# ambient environment variables.
+client = genai.Client(api_key=api_key, vertexai=False)
 
 
 def _extract_text(response) -> str:
@@ -156,8 +188,27 @@ def extract_vitals_node(state: ASHAAgentState) -> Dict[str, Any]:
     errors = list(state.get("errors", []))
 
     prompt = f"""
-    Analyze this English medical/community note and extract patient metadata, variables, and logs into a clean JSON format.
+    You are extracting structured public-health data from a community health worker's field note.
+    The note has already been translated into English below.
+
     Note to evaluate: "{translated_text}"
+
+    Choose exactly one `primary_domain` using this priority order (check top to bottom, first match wins):
+    1. MATERNAL_HEALTH — mentions pregnancy, ANC checkups, delivery, postpartum care, blood pressure,
+       hemoglobin, or any maternal vital sign (e.g. "pregnant", "BP 150/90", "hemoglobin 9.5").
+    2. VITAL_EVENTS — mentions a birth or death event, or child/infant mortality.
+    3. DISEASE_SCREENING — mentions communicable disease symptoms (fever, cough, isolation) or NCD screening
+       that is NOT tied to a pregnancy (if pregnancy is mentioned too, MATERNAL_HEALTH still wins).
+    4. CHILD_HEALTH — mentions immunization, birth weight, breastfeeding, or a child under a specific age.
+    5. COMMUNITY_DEMOGRAPHICS — mentions family planning eligibility or malnutrition screening not covered above.
+    6. DRUG_SUPPLIES — primarily about medicine/consumable stock or distribution counts.
+    7. WORK_LOGS — general activity/outreach logging with no clinical signal above.
+
+    Extract every numeric vital sign exactly as stated (blood pressure as separate systolic_bp/diastolic_bp
+    integers, hemoglobin as a decimal number, ages/weeks as integers). Do not invent values that are not
+    present in the note — leave those fields absent instead of guessing. Populate every relevant nested
+    object even when primary_domain is a different domain, since a note can carry signals for multiple
+    domains at once (e.g. a maternal note can also carry disease_screening symptoms).
     """
 
     response_schema = {
