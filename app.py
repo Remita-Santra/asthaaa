@@ -8,12 +8,23 @@ from dotenv import load_dotenv
 # Safe environment configuration block
 load_dotenv()
 
-api_key = os.environ.get("GEMINI_API_KEY")
+
+def _clean_api_key(raw_key):
+    """Strip whitespace and accidental wrapping quotes copied into .env / secrets."""
+    if not raw_key:
+        return raw_key
+    cleaned = raw_key.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in ("'", '"'):
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
+
+
+api_key = _clean_api_key(os.environ.get("GEMINI_API_KEY"))
 if not api_key:
     # st.secrets raises StreamlitSecretNotFoundError (not just a missing
     # key) when no secrets.toml exists at all, so this must be guarded.
     try:
-        api_key = st.secrets.get("GEMINI_API_KEY")
+        api_key = _clean_api_key(st.secrets.get("GEMINI_API_KEY"))
     except Exception:
         api_key = None
 
@@ -23,7 +34,49 @@ if not api_key:
 
 # Import the Google GenAI module safely
 from google import genai
-client = genai.Client(api_key=api_key)
+
+# vertexai=False is explicit: if GOOGLE_GENAI_USE_VERTEXAI happens to be set
+# to true anywhere in this environment, the SDK will otherwise silently try
+# to authenticate via Vertex AI (OAuth/ADC) instead of this API key, which
+# produces a 401 "ACCESS_TOKEN_TYPE_UNSUPPORTED / Expected OAuth 2 access
+# token" error identically on every call — exactly the symptom this app hit.
+client = genai.Client(api_key=api_key, vertexai=False)
+
+
+@st.cache_resource(show_spinner=False)
+def _verify_gemini_credentials(key_fingerprint: str):
+    """
+    Make one cheap live call at startup to confirm the API key actually
+    authenticates, instead of letting every node fail identically with a
+    401 the first time a real case is submitted. Cached per key value
+    (key_fingerprint) so it only runs once per key per process, not on
+    every Streamlit rerun.
+    """
+    try:
+        client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents="ping",
+        )
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+_verified_ok, _verify_error = _verify_gemini_credentials(api_key[-8:] if len(api_key) >= 8 else api_key)
+if not _verified_ok:
+    st.error(
+        "🛑 Could not authenticate with the Gemini API using the configured "
+        "GEMINI_API_KEY. This app will not be able to transcribe, translate, "
+        "or extract anything until this is fixed.\n\n"
+        "Common causes:\n"
+        "- The key is invalid, expired, or was revoked — generate a fresh one at "
+        "https://aistudio.google.com/apikey\n"
+        "- `GOOGLE_GENAI_USE_VERTEXAI` is set to true somewhere in this environment, "
+        "forcing Vertex AI (OAuth) auth instead of a plain API key\n"
+        "- The key has API restrictions that exclude the Generative Language API\n\n"
+        f"Raw error: {_verify_error}"
+    )
+    st.stop()
 
 from graph import asha_agent_graph
 import db
