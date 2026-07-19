@@ -2,7 +2,7 @@
 import os
 from dotenv import load_dotenv
 
-api_key = os.environ.get("GEMINI_API_KEY")
+api_key = os.env.get("GEMINI_API_KEY")
 
 if not api_key:
     raise ValueError("Missing key!")
