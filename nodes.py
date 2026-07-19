@@ -38,18 +38,15 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
     translated_en = ""
     detected_language = "English"
 
-    # --- nodes.py ingest_node UPDATE ---
     if state.get("input_mode") == "audio" and audio_path and os.path.exists(audio_path):
         try:
             print(f"[Nodes] Uploading stabilized voice notes track: {audio_path}")
             
-            # Explicitly define the audio standard MIME payload parameter
             uploaded_audio = client.files.upload(
                 file=audio_path,
                 config=types.UploadFileConfig(mime_type="audio/wav")
             )
             
-            # Pool status explicitly before executing content extraction layers
             while uploaded_audio.state.name == "PROCESSING":
                 time.sleep(1)
                 uploaded_audio = client.files.get(name=uploaded_audio.name)
@@ -57,27 +54,22 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
             if uploaded_audio.state.name == "FAILED":
                 raise Exception("Google API processing layer failed to decode file structure.")
 
-            # Optimized Prompt to fix incorrect voice evaluations and translations
             transcription_prompt = (
                 "You are an expert medical transcriptionist and translator working with rural community health systems. "
                 "Examine this voice note spoken by an ASHA worker carefully. "
-                "1. Transcribe the raw text accurately, paying close attention to vital numerical indicators (e.g., blood pressure numbers like 140/90, age, hemoglobin counts, weights). "
-                "2. The recording contains mixed Hindi and English clinical phrases (Hinglish), e.g., 'sar dard hai', 'hemoglobin 9.5 hai', 'blood pressure badha hai'. "
+                "1. Transcribe the raw text accurately, paying close attention to vital numerical indicators, patient fields, and data counts. "
+                "2. The recording contains mixed Hindi and English clinical phrases (Hinglish). "
                 "3. Provide the final output translated completely and seamlessly into clear, standard clinical English. "
                 "Do not add conversational commentary or summaries; output only the high-accuracy translation."
             )
 
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
-                contents=[
-                    transcription_prompt, 
-                    uploaded_audio
-                ]
+                contents=[transcription_prompt, uploaded_audio]
             )
             translated_en = response.text.strip()
             detected_language = "Detected from Audio"
             
-            # Remove deletion or introduce short buffer sleep to avoid server side clipping
             time.sleep(0.5) 
             client.files.delete(name=uploaded_audio.name)
             
@@ -86,7 +78,6 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
             translated_en = f"Audio processing failed runtime tracking: {str(e)}"
    
     else:
-        # If text is typed, use a quick LLM call to translate it to English if needed
         if raw_text:
             try:
                 response = client.models.generate_content(
@@ -113,28 +104,63 @@ def language_and_translate_node(state: ASHAAgentState) -> Dict[str, Any]:
 
 def extract_vitals_node(state: ASHAAgentState) -> Dict[str, Any]:
     """
-    Uses structured schema parsing to extract medical vitals from text fields.
+    Uses structured schema parsing to extract medical records, metrics, 
+    and administrative fields into an expanded unified metadata schema.
     """
     translated_text = state.get("translated_text_en", "")
     errors = list(state.get("errors", []))
     
-    # Force Structured JSON Extraction from text
     prompt = f"""
-    Analyze this English medical note and extract vitals or records into JSON format.
+    Analyze this English medical/community note and extract patient metadata, variables, and logs into a clean JSON format.
     
     Note: "{translated_text}"
     
-    Respond STRICTLY with a valid JSON object matching this structure:
+    Respond STRICTLY with a valid JSON object matching this structure exactly. Populate unmentioned fields as null or empty arrays:
     {{
-        "patient_type": "MATERNAL" or "CHILD" or "GENERAL",
-        "extracted_vitals": {{
-            "systolic": integer or null,
-            "diastolic": integer or null,
-            "hemoglobin": float or null,
-            "gestational_age_weeks": integer or null
+        "primary_domain": "MATERNAL_HEALTH" or "CHILD_HEALTH" or "VITAL_EVENTS" or "DISEASE_SCREENING" or "COMMUNITY_DEMOGRAPHICS" or "DRUG_SUPPLIES" or "WORK_LOGS",
+        "maternal_health": {{
+            "is_pregnant": boolean or null,
+            "anc_checkup_count": integer or null,
+            "institutional_delivery": boolean or null,
+            "postpartum_care_received": boolean or null,
+            "gestational_age_weeks": integer or null,
+            "systolic_bp": integer or null,
+            "diastolic_bp": integer or null,
+            "hemoglobin": float or null
         }},
-        "patient_record": {{
-            "conditions": ["list", "of", "conditions"]
+        "child_health_immunization": {{
+            "has_birth_record": boolean or null,
+            "immunizations_given": ["list", "of", "vaccines"],
+            "birth_weight_kg": float or null,
+            "breastfeeding_progress_status": "EXCLUSIVE" or "PARTIAL" or "ISSUES" or null
+        }},
+        "vital_events": {{
+            "is_birth_event": boolean or null,
+            "is_death_event": boolean or null,
+            "infant_child_mortality_flag": boolean or null,
+            "demographic_notes": string or null
+        }},
+        "disease_screening": {{
+            "communicable_symptoms": ["malaria", "leprosy", "tuberculosis", "etc"],
+            "ncd_screening_results": string or null,
+            "requires_immediate_isolation": boolean or null
+        }},
+        "community_demographics": {{
+            "eligible_family_planning_couple": boolean or null,
+            "malnourished_child_flag": boolean or null,
+            "targeted_nutritional_support_required": boolean or null
+        }},
+        "drug_supplies_services": {{
+            "items_consumed": [
+                {{"item_name": "ORS", "quantity": 2}},
+                {{"item_name": "IFA_tablets", "quantity": 30}},
+                {{"item_name": "contraceptives", "quantity": 5}}
+            ]
+        }},
+        "work_logs": {{
+            "activity_description": string or null,
+            "performance_incentive_eligible": boolean or null,
+            "children_mobilized_count": integer or null
         }}
     }}
     """
@@ -149,38 +175,40 @@ def extract_vitals_node(state: ASHAAgentState) -> Dict[str, Any]:
         )
         extracted_data = json.loads(response.text.strip())
     except Exception as e:
-        errors.append(f"Structured vitals extraction failed: {str(e)}")
+        errors.append(f"Structured domain extraction failed: {str(e)}")
+        # Fallback empty structure matching schema
         extracted_data = {
-            "patient_type": "GENERAL",
-            "extracted_vitals": {"systolic": None, "diastolic": None, "hemoglobin": None, "gestational_age_weeks": None},
-            "patient_record": {"conditions": []}
+            "primary_domain": "WORK_LOGS",
+            "maternal_health": {}, "child_health_immunization": {}, "vital_events": {},
+            "disease_screening": {}, "community_demographics": {}, "drug_supplies_services": {}, "work_logs": {}
         }
         
-    # Contextual type override if a MUAC photo was taken
+    # Contextual type adjustments based on edge case context
     if state.get("muac_image_path"):
-        extracted_data["patient_type"] = "CHILD"
+        extracted_data["primary_domain"] = "CHILD_HEALTH"
+        if not extracted_data.get("community_demographics"):
+            extracted_data["community_demographics"] = {}
+        extracted_data["community_demographics"]["malnourished_child_flag"] = True
 
     return {
-        "patient_type": extracted_data.get("patient_type", "GENERAL"),
-        "extracted_vitals": extracted_data.get("extracted_vitals"),
-        "patient_record": extracted_data.get("patient_record"),
+        "patient_type": extracted_data.get("primary_domain", "WORK_LOGS"),
+        "unified_metadata": extracted_data,
         "errors": errors
     }
 
 
 def route_by_patient_type(state: ASHAAgentState) -> str:
-    p_type = state.get("patient_type", "GENERAL")
-    if p_type == "CHILD":
+    """Routes state based on the multi-domain classification engine."""
+    p_type = state.get("patient_type", "WORK_LOGS")
+    if p_type == "CHILD_HEALTH":
         return "muac_analysis"
-    elif p_type == "MATERNAL":
+    elif p_type == "MATERNAL_HEALTH":
         return "maternal_risk"
     return "triage"
 
 
 def muac_analysis_node(state: ASHAAgentState) -> Dict[str, Any]:
-    """
-    Natively processes a photo of a MUAC band using computer vision to diagnose malnutrition.
-    """
+    """Natively processes a photo of a MUAC band using computer vision."""
     image_path = state.get("muac_image_path")
     errors = list(state.get("errors", []))
     
@@ -215,17 +243,21 @@ def muac_analysis_node(state: ASHAAgentState) -> Dict[str, Any]:
 
 
 def maternal_risk_node(state: ASHAAgentState) -> Dict[str, Any]:
-    """Algorithmic parsing node evaluating vital trends."""
-    vitals = state.get("extracted_vitals", {}) or {}
-    systolic = vitals.get("systolic")
-    diastolic = vitals.get("diastolic")
-    hb = vitals.get("hemoglobin")
+    """Algorithmic evaluation layer examining unified maternal records."""
+    metadata = state.get("unified_metadata", {})
+    maternal = metadata.get("maternal_health", {}) or {}
+    
+    systolic = maternal.get("systolic_bp")
+    diastolic = maternal.get("diastolic_bp")
+    hb = maternal.get("hemoglobin")
     
     flags = []
-    if systolic and systolic >= 140 or diastolic and diastolic >= 90:
+    if (systolic and systolic >= 140) or (diastolic and diastolic >= 90):
         flags.append(f"Gestational Hypertension Risk (Blood Pressure: {systolic}/{diastolic})")
     if hb and hb < 11.0:
         flags.append(f"Anemia Detected (Hb level measured low at {hb} g/dL)")
+    if maternal.get("postpartum_care_received") is False:
+        flags.append("Missing required immediate postpartum follow-up care.")
         
     return {
         "maternal_risk_result": {
@@ -236,42 +268,60 @@ def maternal_risk_node(state: ASHAAgentState) -> Dict[str, Any]:
 
 
 def triage_node(state: ASHAAgentState) -> Dict[str, Any]:
-    """Consolidates individual risk flags into a clean classification."""
+    """Consolidates cross-domain fields and clinical observations into a high-level triage ranking."""
+    metadata = state.get("unified_metadata", {}) or {}
     maternal = state.get("maternal_risk_result") or {}
     muac = state.get("muac_result") or {}
     
     risk_level = "LOW"
     reasons = []
     
+    # 1. Evaluate Maternal System Checks
     if maternal.get("risk_flags"):
         risk_level = "HIGH"
         reasons.extend(maternal["risk_flags"])
         
+    # 2. Evaluate Child Health / Nutrition Visual Checks
     muac_class = muac.get("classification", "NORMAL")
     if "SAM" in muac_class:
         risk_level = "URGENT_REFERRAL"
         reasons.append("Severe Acute Malnutrition (SAM) confirmed by image processing.")
     elif "MAM" in muac_class:
-        if risk_level != "HIGH":
+        if risk_level != "HIGH" and risk_level != "URGENT_REFERRAL":
             risk_level = "MODERATE"
         reasons.append("Moderate Acute Malnutrition (MAM) detected via image processing.")
         
+    # 3. Evaluate Disease and Screening Signals
+    screening = metadata.get("disease_screening", {}) or {}
+    if screening.get("communicable_symptoms"):
+        risk_level = "HIGH"
+        syms = ", ".join(screening.get("communicable_symptoms", []))
+        reasons.append(f"Communicable disease indicators flagged: {syms}")
+        
+    # 4. Evaluate Vital Incident Signals
+    vitals = metadata.get("vital_events", {}) or {}
+    if vitals.get("infant_child_mortality_flag"):
+        risk_level = "URGENT_REFERRAL"
+        reasons.append("Critical vital incident record: Child mortality tracking event reported.")
+
     if not reasons:
-        reasons.append("All inputs parsed successfully and fall within regular parameters.")
+        reasons.append("All inputs parsed successfully and fall within standard parameters.")
         
     return {"risk_assessment": {"risk_level": risk_level, "reasons": reasons}}
 
 
 def guidance_generation_node(state: ASHAAgentState) -> Dict[str, Any]:
-    """Generates localized audio-ready field text depending on the risk state."""
+    """Generates localized action directions mapped directly to the active clinical domain profile."""
     triage = state.get("risk_assessment") or {}
-    vitals = state.get("extracted_vitals") or {}
+    metadata = state.get("unified_metadata", {}) or {}
+    
     level = triage.get("risk_level", "LOW")
     reasons_str = ", ".join(triage.get("reasons", []))
+    domain = metadata.get("primary_domain", "GENERAL")
     
     prompt = f"""
     You are an AI assistant helping a community health worker (ASHA worker) in rural India.
-    Based on this clinical synthesis, generate action guidance for the worker to read aloud.
+    Based on this clinical synthesis across domain '{domain}', generate contextual field guidance.
     
     Risk Level: {level}
     Medical Flags: {reasons_str}
@@ -296,7 +346,7 @@ def guidance_generation_node(state: ASHAAgentState) -> Dict[str, Any]:
         guidance_data = json.loads(response.text.strip())
     except Exception:
         guidance_data = {
-            "guidance_text_en": "Follow standard regional operating protocols.",
+            "guidance_text_en": "Follow standard regional operating protocols for metadata filing.",
             "guidance_text_local": "मानक क्षेत्रीय नियमों का पालन करें।"
         }
         
