@@ -164,8 +164,21 @@ with st.sidebar:
     records = st.session_state.get("records", [])
     if records:
         for rec in records:
-            st.write(f"**{rec['abha_ref']}** · {rec['patient_type']} · "
-                     f"{(json.loads(rec['risk_assessment']) if isinstance(rec['risk_assessment'], str) and rec['risk_assessment'].strip() else (rec['risk_assessment'] or {})).get('risk_level', '—')}")
+            # 1. Safely handle the risk assessment JSON or Dict parsing
+            raw_risk = rec.get('risk_assessment')
+            risk_level = "—"
+            
+            if isinstance(raw_risk, dict):
+                risk_level = raw_risk.get('risk_level', '—')
+            elif isinstance(raw_risk, str) and raw_risk.strip():
+                try:
+                    parsed_risk = json.loads(raw_risk)
+                    risk_level = parsed_risk.get('risk_level', '—')
+                except json.JSONDecodeError:
+                    risk_level = "—"
+            
+            # 2. Render cleanly inside the f-string without inline logic jams
+            st.write(f"**{rec.get('abha_ref', 'N/A')}** · {rec.get('patient_type', 'Unknown')} · {risk_level}")
     else:
         st.caption("No historical records fetched for this session.")
 
