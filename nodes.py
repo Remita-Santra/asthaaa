@@ -5,22 +5,15 @@ import time
 from typing import Dict, Any
 from dotenv import load_dotenv
 
-# 1. Force explicit environment variable loading from the project directory
-current_dir = os.path.dirname(os.path.abspath(__file__))
-env_path = os.path.join(current_dir, '.env')
-load_dotenv(dotenv_path=env_path) 
-
 from google import genai
 from google.genai import types
 from state import ASHAAgentState
 
 # 2. Fallback check: Read key from environment variables
-api_key = os.getenv("GEMINI_API_KEY")
+api_key = os.emviron.get("GEMINI_API_KEY")
 
 if not api_key:
-    # ⚠️ SAFEGUARD: If your .env file is completely missing or unreadable,
-    # you can paste your key string directly below:
-    return 
+    raise ValueError("Missing key!")
 # 3. Initialize the unified GenAI Client precisely once
 client = genai.Client(api_key=api_key)
 
