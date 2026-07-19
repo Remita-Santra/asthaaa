@@ -1,12 +1,16 @@
-# app.py
 import os
+import streamlit as st
 from dotenv import load_dotenv
 from google import genai
-api_key = os.environ.get("GEMINI_API_KEY")
+
+load_dotenv()
+
+# Try loading from standard environment, fallback to Streamlit secrets
+api_key = os.environ.get("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY")
 
 if not api_key:
-    raise ValueError("Missing key!")
-# 3. Initialize the unified GenAI Client precisely once
+    raise ValueError("Missing key! Please set GEMINI_API_KEY in your cloud secrets dashboard.")
+
 client = genai.Client(api_key=api_key)
 
 
