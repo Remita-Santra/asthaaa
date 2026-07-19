@@ -1,6 +1,8 @@
 from langgraph.graph import StateGraph, START, END
+
 from state import ASHAAgentState
 import nodes
+
 
 def build_graph():
     graph = StateGraph(ASHAAgentState)
@@ -27,11 +29,16 @@ def build_graph():
         },
     )
 
+    # Both specialist branches still feed into triage so cross-domain
+    # signals (disease screening, drug supplies, demographics) are always
+    # combined with the domain-specific result into one risk_assessment.
     graph.add_edge("muac_analysis", "triage")
     graph.add_edge("maternal_risk", "triage")
+
     graph.add_edge("triage", "guidance_generation")
     graph.add_edge("guidance_generation", END)
 
     return graph.compile()
+
 
 asha_agent_graph = build_graph()
