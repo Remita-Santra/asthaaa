@@ -48,15 +48,7 @@ if not api_key.startswith("AIza"):
         "client ID/secret or a Vertex AI service-account value."
     )
 
-# vertexai=False is explicit and intentional: the google-genai SDK will
-# silently switch to Vertex AI mode (which requires OAuth/ADC credentials,
-# NOT a plain API key) if the GOOGLE_GENAI_USE_VERTEXAI environment variable
-# happens to be set to true anywhere in this environment — even though an
-# api_key is still passed here. That mismatch produces exactly the
-# "Expected OAuth 2 access token... ACCESS_TOKEN_TYPE_UNSUPPORTED" 401 error,
-# identically on every single call, which matches this app's symptom. Forcing
-# vertexai=False here guarantees Developer-API (API-key) auth regardless of
-# ambient environment variables.
+
 client = genai.Client(api_key=api_key, vertexai=False)
 
 
@@ -128,7 +120,7 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
                 )
 
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-2.0-flash",
                     contents=[transcription_prompt, uploaded_audio]
                 )
                 translated_en = _extract_text(response)
@@ -153,7 +145,7 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
         if raw_text:
             try:
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-2.0-flash",
                     contents=f"Translate this Indian healthcare field note precisely into English. Focus heavily on maintaining numbers, medical values, symptoms, and items: {raw_text}"
                 )
                 translated_en = _extract_text(response)
