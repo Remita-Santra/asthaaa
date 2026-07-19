@@ -165,7 +165,7 @@ with st.sidebar:
     if records:
         for rec in records:
             st.write(f"**{rec['abha_ref']}** · {rec['patient_type']} · "
-                     f"{(json.loads(rec['risk_assessment']) if isinstance(rec['risk_assessment'], str) and rec['risk_assessment'].strip() else (rec['risk_assessment'] or {})).get('risk_level', '—')}"
+                     f"{(json.loads(rec['risk_assessment']) if isinstance(rec['risk_assessment'], str) and rec['risk_assessment'].strip() else (rec['risk_assessment'] or {})).get('risk_level', '—')}")
     else:
         st.caption("No historical records fetched for this session.")
 
