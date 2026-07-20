@@ -126,7 +126,7 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
                 )
 
                 response = client.models.generate_content(
-                    model="gemini-3.5-flash",
+                    model="gemini-3.0-flash",
                     contents=[transcription_prompt, uploaded_audio]
                 )
                 translated_en = _extract_text(response)
@@ -151,7 +151,7 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
         if raw_text:
             try:
                 response = client.models.generate_content(
-                    model="gemini-3.5-flash",
+                    model="gemini-3.0-flash",
                     contents=f"Translate this Indian healthcare field note precisely into English. Focus heavily on maintaining numbers, medical values, symptoms, and items: {raw_text}"
                 )
                 translated_en = _extract_text(response)
@@ -307,7 +307,7 @@ def extract_vitals_node(state: ASHAAgentState) -> Dict[str, Any]:
 
     try:
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3.0-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -406,7 +406,7 @@ def muac_analysis_node(state: ASHAAgentState) -> Dict[str, Any]:
         }
         """
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3.0-flash",
             contents=[prompt, uploaded_img],
             config=types.GenerateContentConfig(response_mime_type="application/json")
         )
@@ -543,7 +543,7 @@ def guidance_generation_node(state: ASHAAgentState) -> Dict[str, Any]:
 
     try:
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3.0-flash",
             contents=prompt,
             config=types.GenerateContentConfig(response_mime_type="application/json")
         )
