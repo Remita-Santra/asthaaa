@@ -329,6 +329,35 @@ def extract_vitals_node(state: ASHAAgentState) -> Dict[str, Any]:
             extracted_data["community_demographics"] = {}
         extracted_data["community_demographics"]["malnourished_child_flag"] = True
 
+    # The ASHA worker directly selects "Pregnant Woman" / "Child" / "Other"
+    # on the Patient Details form before recording the conversation — that
+    # first-hand knowledge is more reliable than inferring the domain purely
+    # from the note, so it takes priority over the model's classification,
+    # UNLESS the model detected a critical vital event (birth/death), which
+    # must never be silently downgraded.
+    category = state.get("patient_category")
+    vitals_preview = extracted_data.get("vital_events", {}) or {}
+    is_critical_vital_event = bool(
+        vitals_preview.get("is_death_event") or vitals_preview.get("infant_child_mortality_flag")
+    )
+    if category == "PREGNANT_WOMAN" and not is_critical_vital_event:
+        extracted_data["primary_domain"] = "MATERNAL_HEALTH"
+    elif category == "CHILD" and not is_critical_vital_event:
+        extracted_data["primary_domain"] = "CHILD_HEALTH"
+
+    # Manually-entered age / gestational week values from the same form
+    # override whatever (if anything) the model guessed from the note —
+    # a worker-entered number is always more trustworthy than an LLM guess.
+    worker_child_age = state.get("worker_child_age_months")
+    if worker_child_age is not None:
+        extracted_data.setdefault("child_health_immunization", {})
+        extracted_data["child_health_immunization"]["child_age_months"] = worker_child_age
+
+    worker_gestational_weeks = state.get("worker_gestational_age_weeks")
+    if worker_gestational_weeks is not None:
+        extracted_data.setdefault("maternal_health", {})
+        extracted_data["maternal_health"]["gestational_age_weeks"] = worker_gestational_weeks
+
     result: Dict[str, Any] = {
         "patient_type": extracted_data.get("primary_domain", "WORK_LOGS"),
         "unified_metadata": extracted_data,
@@ -682,6 +711,46 @@ def sms_reminder_node(state: ASHAAgentState) -> Dict[str, Any]:
     return {"sms_reminder_status": status}
 
 
+def _compute_required_fill_ups(state: ASHAAgentState) -> list:
+    """
+    Rule-based (no LLM call) review pass that flags what's still missing
+    from this visit's record so the ASHA worker knows what to fill in or
+    double-check before the next visit.
+    """
+    metadata = state.get("unified_metadata", {}) or {}
+    domain = metadata.get("primary_domain") or state.get("patient_type")
+    fill_ups = []
+
+    translated = (state.get("translated_text_en") or "").strip()
+    if len(translated) < 15:
+        fill_ups.append("Conversation transcript is very short — consider re-recording with more detail.")
+
+    if domain == "MATERNAL_HEALTH":
+        maternal = metadata.get("maternal_health", {}) or {}
+        if maternal.get("systolic_bp") is None or maternal.get("diastolic_bp") is None:
+            fill_ups.append("Blood pressure (systolic/diastolic) was not captured — measure and record it.")
+        if maternal.get("hemoglobin") is None:
+            fill_ups.append("Hemoglobin level was not captured — record from the latest test if available.")
+        if maternal.get("anc_checkup_count") is None:
+            fill_ups.append("ANC checkup count was not captured — confirm number of antenatal visits so far.")
+        if maternal.get("gestational_age_weeks") is None:
+            fill_ups.append("Weeks of pregnancy not captured — confirm gestational age.")
+    elif domain == "CHILD_HEALTH":
+        child = metadata.get("child_health_immunization", {}) or {}
+        if child.get("child_age_months") is None:
+            fill_ups.append("Child's age was not captured — record age in months for accurate vaccine tracking.")
+        if not child.get("immunizations_given"):
+            fill_ups.append("No immunization history captured — confirm which vaccines the child has received.")
+        if not state.get("muac_result"):
+            fill_ups.append("No MUAC measurement captured — use the MUAC scanner to check for malnutrition.")
+    elif domain == "DISEASE_SCREENING":
+        screening = metadata.get("disease_screening", {}) or {}
+        if not screening.get("communicable_symptoms"):
+            fill_ups.append("No specific symptoms captured — list the exact symptoms reported.")
+
+    return fill_ups
+
+
 def report_generation_node(state: ASHAAgentState) -> Dict[str, Any]:
     """
     Consolidates the entire visit into one printable/downloadable plain-text
@@ -712,6 +781,13 @@ def report_generation_node(state: ASHAAgentState) -> Dict[str, Any]:
     for reason in risk.get("reasons", []):
         lines.append(f"  - {reason}")
     lines.append("")
+
+    required_fill_ups = _compute_required_fill_ups(state)
+    if required_fill_ups:
+        lines.append("-- Required Fill-Ups / Review --")
+        for item in required_fill_ups:
+            lines.append(f"  - {item}")
+        lines.append("")
 
     muac = state.get("muac_result")
     if muac:
@@ -775,4 +851,4 @@ def report_generation_node(state: ASHAAgentState) -> Dict[str, Any]:
     report_text = "\n".join(lines)
     print(report_text)  # durable server-side log of every visit
 
-    return {"detailed_report": report_text}
+    return {"detailed_report": report_text, "required_fill_ups": required_fill_ups}
