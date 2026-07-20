@@ -2,7 +2,9 @@ import os
 import json
 import uuid
 import tempfile
+import datetime
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 # Safe environment configuration block
@@ -21,7 +23,6 @@ def _clean_api_key(raw_key):
 
 api_key = _clean_api_key(os.environ.get("GEMINI_API_KEY"))
 if not api_key:
-
     try:
         api_key = _clean_api_key(st.secrets.get("GEMINI_API_KEY"))
     except Exception:
@@ -33,7 +34,6 @@ if not api_key:
 
 # Import the Google GenAI module safely
 from google import genai
-
 
 client = genai.Client(api_key=api_key, vertexai=False)
 
@@ -48,10 +48,7 @@ def _verify_gemini_credentials(key_fingerprint: str):
     every Streamlit rerun.
     """
     try:
-        client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents="ping",
-        )
+        client.models.generate_content(model="gemini-3.5-flash", contents="ping")
         return True, None
     except Exception as e:
         return False, str(e)
@@ -81,10 +78,7 @@ st.set_page_config(page_title="ASHTHA FOR ASHA", page_icon="🩺", layout="cente
 # --- CUSTOM CSS FOR PINK, MAROON, AND CREAM THEME ---
 st.markdown("""
     <style>
-        .stApp {
-            background-color:#FFFDF9;
-            color: #5A0E1A;
-        }
+        .stApp { background-color:#FFFDF9; color: #5A0E1A; }
         h1, h2, h3, h4, h5, h6, label, .stMarkdown p {
             color: #5A0E1A !important;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -124,211 +118,393 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# ---------------------------------------------------------------------------
+# PAGE ROUTER
+# ---------------------------------------------------------------------------
+# Simple session-state page router: login -> dashboard -> new_case -> report.
+# Login is required before anything else is reachable.
+if "page" not in st.session_state:
+    st.session_state.page = "login"
 
-st.title("ASHTHA FOR ASHA")
-st.caption(
-    "Turn every ASHA home visit into a fully automated health record — "
-     "No typing, no paper forms, no delays."
-)
 
-# --- SECTION 1: AUTHENTICATION ---
-st.markdown("### 📋 ASHA Worker Authentication")
-with st.container(border=True):
-    col1, col2 = st.columns(2)
-    with col1:
+def go_to(page_name: str):
+    st.session_state.page = page_name
+    st.rerun()
+
+
+PATIENT_CATEGORY_OPTIONS = {
+    "🤰 Pregnant Woman": "PREGNANT_WOMAN",
+    "🧒 Child (under 5)": "CHILD",
+    "🧑 Other / General Patient": "OTHER",
+}
+PATIENT_CATEGORY_LABELS = {v: k for k, v in PATIENT_CATEGORY_OPTIONS.items()}
+
+
+def _risk_level_of(raw_risk):
+    """Normalize a stored risk_assessment (dict / JSON string) to a risk_level string."""
+    if isinstance(raw_risk, dict):
+        return raw_risk.get("risk_level", "—")
+    if isinstance(raw_risk, str) and raw_risk.strip():
+        try:
+            parsed = json.loads(raw_risk)
+            if isinstance(parsed, dict):
+                return parsed.get("risk_level", "—")
+        except json.JSONDecodeError:
+            return "—"
+    return "—"
+
+
+def _reasons_of(raw_risk):
+    if isinstance(raw_risk, dict):
+        return raw_risk.get("reasons", [])
+    if isinstance(raw_risk, str) and raw_risk.strip():
+        try:
+            parsed = json.loads(raw_risk)
+            if isinstance(parsed, dict):
+                return parsed.get("reasons", [])
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def print_button(label="🖨️ Print This Report"):
+    """
+    Streamlit has no native print action, so this renders a small HTML
+    button that triggers the browser's own print dialog (Ctrl+P) for the
+    page via window.parent.print(). The ⬇️ Download button next to it is
+    the more reliable option if the browser blocks the print call.
+    """
+    components.html(
+        f"""
+        <button onclick="window.parent.print()"
+            style="background-color:#5A0E1A;color:#FFFDF9;border:2px solid #5A0E1A;
+            border-radius:8px;padding:0.55rem 1rem;font-size:1rem;cursor:pointer;
+            width:100%;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+            {label}
+        </button>
+        """,
+        height=55,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PAGE: LOGIN
+# ---------------------------------------------------------------------------
+def render_login_page():
+    st.title("ASHTHA FOR ASHA")
+    st.caption(
+        "Turn every ASHA home visit into a fully automated health record — "
+        "voice-first capture, auto-filled forms, vaccine/ANC schedule checks, "
+        "and an auto-scheduled follow-up. No typing, no paper forms, no delays."
+    )
+
+    st.markdown("### 📋 ASHA Worker Log In")
+    with st.container(border=True):
         worker_id = st.text_input(
-            "Enter ASHA Worker ID",
+            "ASHA Worker ID",
             value=st.session_state.get("worker_id", ""),
             placeholder="e.g. ASHA-WEST-4092",
-            key="worker_id_input"
+            key="login_worker_id_input",
         )
-    with col2:
         village = st.text_input(
             "Assigned Village / Settlement",
             value=st.session_state.get("village", ""),
             placeholder="e.g. Rampur Sub-Center",
-            key="village_input"
+            key="login_village_input",
         )
 
-    worker_id = worker_id.strip()
-    village = village.strip()
+        can_login = bool(worker_id.strip()) and bool(village.strip())
+        if st.button("Log In", type="primary", use_container_width=True, disabled=not can_login):
+            st.session_state.worker_id = worker_id.strip()
+            st.session_state.village = village.strip()
+            go_to("dashboard")
 
-    if not worker_id or not village:
-        st.warning("⚠️ Please provide both your Worker ID and Village details to activate the agent workflow below.")
-    else:
-        st.success(f"Verified Session: Active log session for Worker {worker_id} at {village}.")
+        if not can_login:
+            st.caption("Enter both your Worker ID and Village to continue.")
 
-with st.sidebar:
-    st.header("Sync History Log")
-    if st.button("Refresh Historical Records", type="secondary"):
+
+# ---------------------------------------------------------------------------
+# PAGE: DASHBOARD — records of previous reports
+# ---------------------------------------------------------------------------
+def render_dashboard_page():
+    col_title, col_logout = st.columns([4, 1])
+    with col_title:
+        st.title("🏠 Dashboard")
+        st.caption(f"Logged in as **{st.session_state.worker_id}** · {st.session_state.village}")
+    with col_logout:
+        st.write("")
+        if st.button("Log Out", use_container_width=True):
+            for key in ("worker_id", "village", "last_result"):
+                st.session_state.pop(key, None)
+            go_to("login")
+
+    if st.button("➕ New Patient Case", type="primary", use_container_width=True):
+        go_to("new_case")
+
+    st.markdown("### 🗂️ Previous Visit Records")
+    if st.button("🔄 Refresh Records", type="secondary"):
+        st.session_state["records"] = db.fetch_all_records()
+
+    if "records" not in st.session_state:
         st.session_state["records"] = db.fetch_all_records()
 
     records = st.session_state.get("records", [])
-    if records:
-        for rec in records:
-            raw_risk = rec.get('risk_assessment')
-            risk_level = "—"
+    if not records:
+        st.caption("No records yet — start a new patient case to create the first one.")
+        return
 
-            # 1. Handle if it's already a native dict/list
-            if isinstance(raw_risk, dict):
-                risk_level = raw_risk.get('risk_level', '—')
-            elif isinstance(raw_risk, list) and raw_risk:
-                # If it's a list, look inside the first element if it's a dict
-                first_item = raw_risk[0]
-                risk_level = first_item.get('risk_level', '—') if isinstance(first_item, dict) else '—'
+    for rec in records:
+        risk_level = _risk_level_of(rec.get("risk_assessment"))
+        reasons = _reasons_of(rec.get("risk_assessment"))
+        category_label = PATIENT_CATEGORY_LABELS.get(rec.get("patient_category"), rec.get("patient_type", "Unknown"))
+        color = {"LOW": "green", "MODERATE": "orange", "HIGH": "red", "URGENT_REFERRAL": "red"}.get(risk_level, "grey")
 
-            # 2. Handle if it's stored as a JSON string
-            elif isinstance(raw_risk, str) and raw_risk.strip():
-                try:
-                    parsed_risk = json.loads(raw_risk)
-
-                    if isinstance(parsed_risk, dict):
-                        risk_level = parsed_risk.get('risk_level', '—')
-                    elif isinstance(parsed_risk, list) and parsed_risk:
-                        # Safely unpack the first element out of the parsed list
-                        first_item = parsed_risk[0]
-                        risk_level = first_item.get('risk_level', '—') if isinstance(first_item, dict) else '—'
-                except json.JSONDecodeError:
-                    risk_level = "—"
-
-            # 3. Render output cleanly
-            patient_name = rec.get('patient_name', 'Unknown')
-            follow_up = rec.get('follow_up_date')
-            follow_up_str = f" · next visit {follow_up}" if follow_up else ""
-            st.write(
-                f"**{rec.get('abha_ref', 'N/A')}** · {patient_name} · "
-                f"{rec.get('patient_type', 'Unknown')} · {risk_level}{follow_up_str}"
+        with st.container(border=True):
+            st.markdown(
+                f"**{rec.get('patient_name', 'Unknown')}** · {category_label} · "
+                f":{color}[{risk_level}]  \n"
+                f"`{rec.get('abha_ref', 'N/A')}` · recorded {rec.get('recorded_at', '—')} "
+                f"by {rec.get('recorded_by_worker') or 'Unknown worker'}"
             )
-    else:
-        st.caption("No historical records fetched for this session.")
+            if rec.get("follow_up_date"):
+                st.caption(f"📅 Follow-up scheduled: {rec['follow_up_date']}")
+            if reasons:
+                st.caption(" · ".join(reasons[:2]))
 
-# --- SECTION 2: PATIENT CASE ENCOUNTER DATA ENTRY ---
-st.markdown("### 📝 Patient Case Capture")
-
-patient_name = st.text_input(
-    "Patient Name",
-    value=st.session_state.get("patient_name", ""),
-    placeholder="e.g. Sunita Devi",
-    key="patient_name_input",
-    help="Whose visit is this? If left blank, the agent will try to pick a name out of the note/recording.",
-)
-patient_name = patient_name.strip()
-
-mode = st.radio(
-    "Input method — records the ASHA–patient conversation",
-    ["Type note manually", "Record live voice note"],
-    horizontal=True,
-)
-
-raw_text = ""
-audio_path = None
-muac_image_path = None
-
-if mode == "Type note manually":
-    raw_text = st.text_area(
-        "Observation Notes",
-        placeholder="e.g. Pregnant woman with high fever, missing ANC checkup, took 2 ORS kits from the drug log.",
-        height=100,
-    )
-else:
-    audio_file = st.audio_input("Tap microphone to record the ASHA–patient conversation")
-    if audio_file is not None:
-        st.session_state["cached_audio_bytes"] = audio_file.read()
-
-    if "cached_audio_bytes" in st.session_state:
-        tmp_dir = tempfile.gettempdir()
-        stable_audio_path = os.path.join(tmp_dir, "asha_live_speech.wav")
-        with open(stable_audio_path, "wb") as f:
-            f.write(st.session_state["cached_audio_bytes"])
-        audio_path = stable_audio_path
-        st.audio(st.session_state["cached_audio_bytes"], format="audio/wav")
-
-st.markdown("### 📸 MUAC Band Image Capture (Optional)")
-enable_camera = st.checkbox("Toggle Child Malnutrition Scanner")
-
-if enable_camera:
-    img_file = st.camera_input("Position the MUAC band clearly in frame")
-    if img_file is not None:
-        tmp_dir = tempfile.gettempdir()
-        stable_img_path = os.path.join(tmp_dir, "muac_snapshot.jpg")
-        with open(stable_img_path, "wb") as f:
-            f.write(img_file.getbuffer())
-        muac_image_path = stable_img_path
-
-# --- SECTION 3: PIPELINE INVOCATION AND RESPONSE VISUALIZATION ---
-# Patient name is required — every saved record needs to be attributable
-# to a specific patient, not just an ASHA worker/village pair.
-button_disabled = not worker_id or not village or not patient_name
-
-if not patient_name and worker_id and village:
-    st.info("ℹ️ Enter the patient's name above to enable the workflow.")
-
-# Trim whitespace-only notes so they don't slip past the "blank data" check below.
-raw_text_stripped = raw_text.strip() if raw_text else ""
-
-if st.button("Analyze & Run Agent Workflow", type="primary", use_container_width=True, disabled=button_disabled):
-    if not raw_text_stripped and not audio_path and not muac_image_path:
-        st.error("Cannot submit blank data. Please type text notes, record voice input, or supply an alignment image first.")
-    else:
-        initial_state = {
-            "session_id": str(uuid.uuid4()),
-            "asha_worker_id": worker_id,
-            "village": village,
-            "patient_name": patient_name,
-            "input_mode": "audio" if (mode == "Record live voice note" and audio_path) else "text",
-            "raw_text": raw_text_stripped,
-            "raw_audio_path": audio_path,
-            "muac_image_path": muac_image_path,
-            "errors": [],
-        }
-
-        with st.spinner("Processing speech, textual details, and vision metrics..."):
-            try:
-                final_state = asha_agent_graph.invoke(initial_state)
-            except Exception as e:
-                st.error(f"Agent workflow failed to complete: {str(e)}")
-                final_state = None
-
-            generated_abha_ref = None
-            if final_state and "risk_assessment" in final_state and "patient_type" in final_state:
-                generated_abha_ref = f"ABHA-{str(uuid.uuid4())[:8].upper()}"
-                try:
-                    db.save_record(
-                        generated_abha_ref,
-                        final_state.get("patient_name"),
-                        final_state["patient_type"],
-                        final_state["risk_assessment"],
-                        (final_state.get("follow_up_plan") or {}).get("follow_up_date"),
+            if rec.get("detailed_report"):
+                with st.expander("View Full Report"):
+                    st.text_area(
+                        "Report",
+                        rec["detailed_report"],
+                        height=240,
+                        key=f"report_view_{rec.get('abha_ref')}",
+                        label_visibility="collapsed",
                     )
-                    final_state["abha_ref"] = generated_abha_ref
+                    st.download_button(
+                        "⬇️ Download This Report (.txt)",
+                        data=rec["detailed_report"],
+                        file_name=f"ASHA_report_{rec.get('abha_ref', 'record')}.txt",
+                        mime="text/plain",
+                        key=f"download_{rec.get('abha_ref')}",
+                    )
+            else:
+                st.caption("Full report text not available for this record.")
+
+
+# ---------------------------------------------------------------------------
+# PAGE: NEW CASE — patient details / conversation capture / MUAC (separate blocks)
+# ---------------------------------------------------------------------------
+def render_new_case_page():
+    col_title, col_back = st.columns([4, 1])
+    with col_title:
+        st.title("📝 New Patient Case")
+        st.caption(f"Worker **{st.session_state.worker_id}** · {st.session_state.village}")
+    with col_back:
+        st.write("")
+        if st.button("← Dashboard", use_container_width=True):
+            go_to("dashboard")
+
+    # --- BLOCK 1: Patient Details ---
+    st.markdown("### 🧑‍🤝‍🧑 Patient Details")
+    with st.container(border=True):
+        patient_name = st.text_input(
+            "Patient Name",
+            value=st.session_state.get("patient_name", ""),
+            placeholder="e.g. Sunita Devi",
+            key="patient_name_input",
+        )
+        patient_name = patient_name.strip()
+
+        category_display = st.radio(
+            "Who is this visit for?",
+            list(PATIENT_CATEGORY_OPTIONS.keys()),
+            horizontal=True,
+            key="patient_category_input",
+        )
+        patient_category = PATIENT_CATEGORY_OPTIONS[category_display]
+
+        worker_gestational_weeks = None
+        worker_child_age_months = None
+
+        if patient_category == "PREGNANT_WOMAN":
+            worker_gestational_weeks = st.number_input(
+                "Weeks of pregnancy (if known — leave at 0 if unknown)",
+                min_value=0, max_value=45, value=0, step=1,
+            )
+            worker_gestational_weeks = worker_gestational_weeks or None
+        elif patient_category == "CHILD":
+            worker_child_age_months = st.number_input(
+                "Child's age in months (if known — leave at 0 if unknown)",
+                min_value=0, max_value=71, value=0, step=1,
+            )
+            worker_child_age_months = worker_child_age_months or None
+
+    # --- BLOCK 2: Patient Case Capture (the ASHA-patient conversation) ---
+    st.markdown("### 🎙️ Patient Case Capture — Conversation")
+    with st.container(border=True):
+        mode = st.radio(
+            "Input method — records the ASHA–patient conversation",
+            ["Type note manually", "Record live voice note"],
+            horizontal=True,
+        )
+
+        raw_text = ""
+        audio_path = None
+
+        if mode == "Type note manually":
+            raw_text = st.text_area(
+                "Observation Notes",
+                placeholder="e.g. Pregnant woman with high fever, missing ANC checkup, took 2 ORS kits from the drug log.",
+                height=100,
+            )
+        else:
+            audio_file = st.audio_input("Tap microphone to record the ASHA–patient conversation")
+            if audio_file is not None:
+                st.session_state["cached_audio_bytes"] = audio_file.read()
+
+            if "cached_audio_bytes" in st.session_state:
+                tmp_dir = tempfile.gettempdir()
+                stable_audio_path = os.path.join(tmp_dir, "asha_live_speech.wav")
+                with open(stable_audio_path, "wb") as f:
+                    f.write(st.session_state["cached_audio_bytes"])
+                audio_path = stable_audio_path
+                st.audio(st.session_state["cached_audio_bytes"], format="audio/wav")
+                st.caption("This recording is converted to text automatically once you run the workflow below.")
+
+    # --- BLOCK 3: MUAC Band Analysis (separate block, mainly for children) ---
+    st.markdown("### 📸 MUAC Band Analysis (Child Malnutrition Check)")
+    muac_image_path = None
+    with st.container(border=True):
+        if patient_category != "CHILD":
+            st.caption("Optional — mainly used for child patients. Switch Patient Details to 'Child' to prioritize this.")
+        enable_camera = st.checkbox("Enable MUAC Scanner Camera")
+        if enable_camera:
+            img_file = st.camera_input("Position the MUAC band clearly in frame")
+            if img_file is not None:
+                tmp_dir = tempfile.gettempdir()
+                stable_img_path = os.path.join(tmp_dir, "muac_snapshot.jpg")
+                with open(stable_img_path, "wb") as f:
+                    f.write(img_file.getbuffer())
+                muac_image_path = stable_img_path
+
+    # --- RUN WORKFLOW ---
+    st.markdown("### 🚀 Run Agent Workflow")
+    button_disabled = not patient_name
+    if not patient_name:
+        st.info("ℹ️ Enter the patient's name above to enable the workflow.")
+
+    raw_text_stripped = raw_text.strip() if raw_text else ""
+
+    if st.button("Analyze & Run Agent Workflow", type="primary", use_container_width=True, disabled=button_disabled):
+        if not raw_text_stripped and not audio_path and not muac_image_path:
+            st.error("Cannot submit blank data. Please type text notes, record voice input, or supply an alignment image first.")
+        else:
+            initial_state = {
+                "session_id": str(uuid.uuid4()),
+                "asha_worker_id": st.session_state.worker_id,
+                "village": st.session_state.village,
+                "patient_name": patient_name,
+                "patient_category": patient_category,
+                "worker_child_age_months": worker_child_age_months,
+                "worker_gestational_age_weeks": worker_gestational_weeks,
+                "input_mode": "audio" if (mode == "Record live voice note" and audio_path) else "text",
+                "raw_text": raw_text_stripped,
+                "raw_audio_path": audio_path,
+                "muac_image_path": muac_image_path,
+                "errors": [],
+            }
+
+            with st.spinner("Processing speech, textual details, and vision metrics with Gemini AI..."):
+                try:
+                    final_state = asha_agent_graph.invoke(initial_state)
                 except Exception as e:
-                    st.warning(f"Record processed but could not be saved to history: {str(e)}")
+                    st.error(f"Agent workflow failed to complete: {str(e)}")
+                    final_state = None
 
-        if final_state:
-            st.session_state["last_result"] = final_state
+                if final_state and "risk_assessment" in final_state and "patient_type" in final_state:
+                    generated_abha_ref = f"ABHA-{str(uuid.uuid4())[:8].upper()}"
+                    try:
+                        db.save_record(
+                            generated_abha_ref,
+                            final_state.get("patient_name"),
+                            final_state["patient_type"],
+                            final_state["risk_assessment"],
+                            (final_state.get("follow_up_plan") or {}).get("follow_up_date"),
+                            patient_category=final_state.get("patient_category"),
+                            recorded_by_worker=final_state.get("asha_worker_id"),
+                            village=final_state.get("village"),
+                            guidance_text_en=final_state.get("guidance_text_en"),
+                            guidance_text_local=final_state.get("guidance_text_local"),
+                            detailed_report=final_state.get("detailed_report"),
+                        )
+                        final_state["abha_ref"] = generated_abha_ref
+                    except Exception as e:
+                        st.warning(f"Record processed but could not be saved to history: {str(e)}")
 
-# Render output cards dynamically
-result = st.session_state.get("last_result")
-if result:
+            if final_state:
+                st.session_state["last_result"] = final_state
+                st.session_state.pop("cached_audio_bytes", None)
+                st.session_state["records"] = db.fetch_all_records()
+                go_to("report")
+
+
+# ---------------------------------------------------------------------------
+# PAGE: REPORT — conversation as text, risk/guidance, required fill-ups, print
+# ---------------------------------------------------------------------------
+def render_report_page():
+    result = st.session_state.get("last_result")
+
+    col_title, col_nav = st.columns([4, 1])
+    with col_title:
+        st.title("📄 Visit Report")
+    with col_nav:
+        st.write("")
+        if st.button("← Dashboard", use_container_width=True):
+            go_to("dashboard")
+
+    if not result:
+        st.info("No report to show yet. Start a new patient case first.")
+        if st.button("➕ New Patient Case"):
+            go_to("new_case")
+        return
+
     display_name = result.get("patient_name") or "the patient"
-    st.success(f"Triage Evaluation Complete for {display_name}.")
+    category_label = PATIENT_CATEGORY_LABELS.get(result.get("patient_category"), "")
+    st.success(f"Triage Evaluation Complete for {display_name}" + (f" ({category_label})" if category_label else "") + ".")
+    if result.get("abha_ref"):
+        st.caption(f"ABHA Reference: `{result['abha_ref']}`")
 
+    # --- Conversation recorded, shown as text ---
+    st.subheader("🗣️ Conversation Recorded (Converted to Text)")
+    st.write(result.get("translated_text_en") or "No conversation text was captured for this visit.")
+    st.caption(f"Detected input: {result.get('detected_language', 'Unknown')}")
+
+    # --- Risk assessment ---
     risk = result.get("risk_assessment", {})
     level = risk.get("risk_level", "LOW")
     color = {"LOW": "green", "MODERATE": "orange", "HIGH": "red", "URGENT_REFERRAL": "red"}.get(level, "red")
-
     st.markdown(f"### Assessment Outcome: :{color}[{level}]")
     for reason in risk.get("reasons", []):
         st.write(f"- {reason}")
 
-    st.subheader("Action Steps for ASHA Worker")
+    # --- Guidance ---
+    st.subheader("✅ Action Steps for ASHA Worker")
     tab_en, tab_local = st.tabs(["English Guidance Instructions", "Hindi / Local Dialect Translation"])
     with tab_en:
         st.info(result.get("guidance_text_en", "No guidance text received."))
     with tab_local:
         st.info(result.get("guidance_text_local", "कोई निर्देश उपलब्ध नहीं है।"))
 
-    # --- Vaccine / ANC Schedule Check ---
+    # --- Required fill-ups / review ---
+    fill_ups = result.get("required_fill_ups") or []
+    if fill_ups:
+        st.subheader("📝 Required Fill-Ups & Review")
+        for item in fill_ups:
+            st.warning(item)
+    else:
+        st.caption("✔️ No missing fields flagged for this visit.")
+
+    # --- Vaccine / ANC schedule check ---
     schedule_result = result.get("schedule_check_result")
     if schedule_result:
         st.subheader("💉 Vaccine / ANC Schedule Check")
@@ -339,7 +515,7 @@ if result:
         for note in schedule_result.get("notes", []):
             st.caption(f"ℹ️ {note}")
 
-    # --- Follow-Up + SMS Reminder ---
+    # --- Follow-up + SMS reminder ---
     plan = result.get("follow_up_plan")
     sms = result.get("sms_reminder_status")
     if plan or sms:
@@ -366,30 +542,54 @@ if result:
             "administrative_metadata": {
                 "abha_ref": result.get("abha_ref"),
                 "patient_name": result.get("patient_name"),
+                "patient_category": result.get("patient_category"),
                 "managed_by_worker": result.get("asha_worker_id"),
                 "registered_village": result.get("village"),
                 "detected_language": result.get("detected_language"),
                 "translated_text_en": result.get("translated_text_en"),
-                "abha_sync_status": result.get("abha_sync_status")
+                "abha_sync_status": result.get("abha_sync_status"),
             },
-            "extracted_multi_domain_records": result.get("unified_metadata", {})
+            "extracted_multi_domain_records": result.get("unified_metadata", {}),
         }
         st.json(metadata_payload)
 
-    # --- Detailed, printable/downloadable report ---
+    # --- Printable / downloadable detailed report ---
     if result.get("detailed_report"):
         st.subheader("🖨️ Detailed Visit Report")
         st.text_area("Report Preview", result["detailed_report"], height=280, key="report_preview")
         safe_name = (result.get("patient_name") or "patient").replace(" ", "_")
-        st.download_button(
-            label="⬇️ Download Detailed Report (.txt)",
-            data=result["detailed_report"],
-            file_name=f"ASHA_report_{safe_name}_{result.get('abha_ref', 'record')}.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
+        col_print, col_download = st.columns(2)
+        with col_print:
+            print_button()
+        with col_download:
+            st.download_button(
+                label="⬇️ Download Report (.txt)",
+                data=result["detailed_report"],
+                file_name=f"ASHA_report_{safe_name}_{result.get('abha_ref', 'record')}.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
 
     if result.get("errors"):
         with st.expander("⚠️ Backend Execution Warning Logs"):
             for error_log in result["errors"]:
                 st.write("-", error_log)
+
+    st.divider()
+    if st.button("➕ Start Another Patient Case", type="primary", use_container_width=True):
+        go_to("new_case")
+
+
+# ---------------------------------------------------------------------------
+# ROUTE
+# ---------------------------------------------------------------------------
+if st.session_state.page == "login" or "worker_id" not in st.session_state:
+    render_login_page()
+elif st.session_state.page == "dashboard":
+    render_dashboard_page()
+elif st.session_state.page == "new_case":
+    render_new_case_page()
+elif st.session_state.page == "report":
+    render_report_page()
+else:
+    render_dashboard_page()
