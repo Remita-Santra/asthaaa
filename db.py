@@ -2,12 +2,7 @@ import json
 import datetime
 from typing import List, Dict, Any, Optional
 
-# Simple In-Memory Datastore Engine
-# NOTE: This is a mock, process-local ledger for demo purposes — it resets
-# every time the process restarts. In a real deployment this would be
-# swapped for a persistent store (a proper database, or the ABHA-linked
-# backend), but fetch_all_records() / save_record() are written so that
-# swap can happen without touching app.py or nodes.py.
+
 _MOCK_DATABASE_LEDGER: List[Dict[str, Any]] = [
     {
         "abha_ref": "ABHA-9921-2201",
