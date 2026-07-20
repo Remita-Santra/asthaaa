@@ -75,48 +75,160 @@ import db
 
 st.set_page_config(page_title="ASHTHA FOR ASHA", page_icon="🩺", layout="centered")
 
-# --- CUSTOM CSS FOR PINK, MAROON, AND CREAM THEME ---
-st.markdown("""
+# --- CUSTOM CSS: LIGHT PINK / MAROON / WHITE THEME ---
+# Forced with !important on stable data-testid selectors so the palette
+# stays identical whether the user's Streamlit client is set to Light or
+# Dark mode — the app never switches to Streamlit's own dark palette.
+PALETTE = {
+    "bg": "#FFFDF9",          # warm white / cream app background
+    "card_bg": "#FFF0F2",     # light pink card background
+    "card_border": "#C48B95", # dusty rose border
+    "sidebar_bg": "#FFF5F6",  # very light pink sidebar
+    "sidebar_border": "#E8C1C7",
+    "maroon": "#5A0E1A",      # primary text / primary button
+    "accent": "#D34E65",      # rose accent / hover / focus
+    "input_bg": "#FFFFFF",
+    "placeholder": "#B98A93",
+    "disabled": "#E8C1C7",
+}
+
+st.markdown(f"""
     <style>
-        .stApp { background-color:#FFFDF9; color: #5A0E1A; }
-        h1, h2, h3, h4, h5, h6, label, .stMarkdown p {
-            color: #5A0E1A !important;
+        /* ---- Base app surface (overrides both light & dark Streamlit themes) ---- */
+        html, body, .stApp,
+        [data-testid="stAppViewContainer"], [data-testid="stMain"],
+        [data-testid="stHeader"], [data-testid="stBottomBlockContainer"],
+        [data-testid="stToolbar"] {{
+            background-color: {PALETTE['bg']} !important;
+            color: {PALETTE['maroon']} !important;
+        }}
+
+        /* ---- Typography ---- */
+        h1, h2, h3, h4, h5, h6, label, p, span,
+        .stMarkdown, .stMarkdown p, .stCaption,
+        [data-testid="stCaptionContainer"], [data-testid="stMarkdownContainer"] {{
+            color: {PALETTE['maroon']} !important;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        div[data-testid="stContainerBorder"] {
-            background-color: #FFF0F2 !important;
-            border: 1px solid #C48B95 !important;
+        }}
+
+        /* ---- Bordered cards / containers & expanders ---- */
+        div[data-testid="stContainerBorder"], div[data-testid="stExpander"] {{
+            background-color: {PALETTE['card_bg']} !important;
+            border: 1px solid {PALETTE['card_border']} !important;
             border-radius: 10px;
-            padding: 1.5rem;
-        }
-        button[data-testid="baseButton-primary"] {
-            background-color: #5A0E1A !important;
-            color: #FFFDF9 !important;
-            border: 2px solid #5A0E1A !important;
+        }}
+        div[data-testid="stContainerBorder"] {{ padding: 1.5rem; }}
+        [data-testid="stExpander"] summary,
+        [data-testid="stExpanderDetails"] {{
+            background-color: {PALETTE['card_bg']} !important;
+            color: {PALETTE['maroon']} !important;
+        }}
+
+        /* ---- Buttons ---- */
+        button[data-testid="baseButton-primary"] {{
+            background-color: {PALETTE['maroon']} !important;
+            color: {PALETTE['bg']} !important;
+            border: 2px solid {PALETTE['maroon']} !important;
             border-radius: 8px !important;
             transition: all 0.3s ease;
-        }
-        button[data-testid="baseButton-primary"]:hover {
-            background-color: #D34E65 !important;
-            color: #FFFDF9 !important;
-            border-color: #D34E65 !important;
-        }
-        button[data-testid="baseButton-secondary"] {
-            background-color: #FFFDF9 !important;
-            color: #5A0E1A !important;
-            border: 1px solid #C48B95 !important;
-        }
-        section[data-testid="stSidebar"] {
-            background-color: #FFF5F6 !important;
-            border-right: 1px solid #E8C1C7;
-        }
-        .stAlert {
-            background-color: #FFF0F2 !important;
-            color: #5A0E1A !important;
-            border-left: 5px solid #D34E65 !important;
-        }
+        }}
+        button[data-testid="baseButton-primary"]:hover {{
+            background-color: {PALETTE['accent']} !important;
+            color: {PALETTE['bg']} !important;
+            border-color: {PALETTE['accent']} !important;
+        }}
+        button[data-testid="baseButton-primary"]:disabled {{
+            background-color: {PALETTE['disabled']} !important;
+            color: {PALETTE['bg']} !important;
+            border-color: {PALETTE['disabled']} !important;
+            opacity: 1 !important;
+        }}
+        button[data-testid="baseButton-secondary"] {{
+            background-color: {PALETTE['input_bg']} !important;
+            color: {PALETTE['maroon']} !important;
+            border: 1px solid {PALETTE['card_border']} !important;
+        }}
+        button[data-testid="baseButton-secondary"]:hover {{
+            background-color: {PALETTE['card_bg']} !important;
+            color: {PALETTE['maroon']} !important;
+            border-color: {PALETTE['accent']} !important;
+        }}
+        [data-testid="stDownloadButton"] button {{
+            background-color: {PALETTE['input_bg']} !important;
+            color: {PALETTE['maroon']} !important;
+            border: 1px solid {PALETTE['card_border']} !important;
+        }}
+        [data-testid="stDownloadButton"] button:hover {{
+            background-color: {PALETTE['card_bg']} !important;
+            border-color: {PALETTE['accent']} !important;
+        }}
+
+        /* ---- Sidebar ---- */
+        section[data-testid="stSidebar"], [data-testid="stSidebarContent"] {{
+            background-color: {PALETTE['sidebar_bg']} !important;
+            border-right: 1px solid {PALETTE['sidebar_border']};
+        }}
+        section[data-testid="stSidebar"] * {{ color: {PALETTE['maroon']} !important; }}
+
+        /* ---- Text / number inputs & text areas ---- */
+        .stTextInput input, .stTextArea textarea, .stNumberInput input {{
+            background-color: {PALETTE['input_bg']} !important;
+            color: {PALETTE['maroon']} !important;
+            border: 1px solid {PALETTE['card_border']} !important;
+            border-radius: 6px !important;
+        }}
+        .stTextInput input::placeholder, .stTextArea textarea::placeholder {{
+            color: {PALETTE['placeholder']} !important;
+        }}
+        .stTextInput input:focus, .stTextArea textarea:focus, .stNumberInput input:focus {{
+            border-color: {PALETTE['accent']} !important;
+            box-shadow: 0 0 0 1px {PALETTE['accent']} !important;
+        }}
+
+        /* ---- Radio buttons & checkboxes ---- */
+        div[role="radiogroup"] label p, .stCheckbox label p {{
+            color: {PALETTE['maroon']} !important;
+        }}
+
+        /* ---- Select boxes ---- */
+        div[data-baseweb="select"] > div {{
+            background-color: {PALETTE['input_bg']} !important;
+            color: {PALETTE['maroon']} !important;
+            border: 1px solid {PALETTE['card_border']} !important;
+        }}
+        ul[data-testid="stSelectboxVirtualDropdown"] {{
+            background-color: {PALETTE['input_bg']} !important;
+        }}
+        ul[data-testid="stSelectboxVirtualDropdown"] li {{
+            color: {PALETTE['maroon']} !important;
+        }}
+
+        /* ---- Tabs ---- */
+        button[data-baseweb="tab"] p {{ color: {PALETTE['maroon']} !important; }}
+        button[data-baseweb="tab"][aria-selected="true"] p {{ color: {PALETTE['accent']} !important; }}
+        div[data-baseweb="tab-highlight"] {{ background-color: {PALETTE['accent']} !important; }}
+        div[data-baseweb="tab-border"] {{ background-color: {PALETTE['sidebar_border']} !important; }}
+
+        /* ---- Alerts: info / success / warning / error ---- */
+        .stAlert, [data-testid="stNotification"] {{
+            background-color: {PALETTE['card_bg']} !important;
+            color: {PALETTE['maroon']} !important;
+            border-left: 5px solid {PALETTE['accent']} !important;
+        }}
+        .stAlert p, [data-testid="stNotification"] p {{ color: {PALETTE['maroon']} !important; }}
+
+        /* ---- JSON viewer / code blocks ---- */
+        [data-testid="stJson"], pre, code {{
+            background-color: {PALETTE['sidebar_bg']} !important;
+            color: {PALETTE['maroon']} !important;
+        }}
+
+        /* ---- Divider & spinner ---- */
+        hr {{ border-color: {PALETTE['sidebar_border']} !important; }}
+        [data-testid="stSpinner"] div {{ color: {PALETTE['maroon']} !important; }}
     </style>
 """, unsafe_allow_html=True)
+
 
 # ---------------------------------------------------------------------------
 # PAGE ROUTER
