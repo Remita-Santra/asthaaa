@@ -128,8 +128,7 @@ st.markdown("""
 st.title("ASHTHA FOR ASHA")
 st.caption(
     "Turn every ASHA home visit into a fully automated health record — "
-    "voice-first capture, auto-filled forms, vaccine/ANC schedule checks, "
-    "and an auto-scheduled follow-up. No typing, no paper forms, no delays."
+     "No typing, no paper forms, no delays."
 )
 
 # --- SECTION 1: AUTHENTICATION ---
@@ -283,7 +282,7 @@ if st.button("Analyze & Run Agent Workflow", type="primary", use_container_width
             "errors": [],
         }
 
-        with st.spinner("Processing speech, textual details, and vision metrics with Gemini AI..."):
+        with st.spinner("Processing speech, textual details, and vision metrics..."):
             try:
                 final_state = asha_agent_graph.invoke(initial_state)
             except Exception as e:
