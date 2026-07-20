@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import datetime
 from typing import Dict, Any
 from dotenv import load_dotenv
 
@@ -77,8 +78,9 @@ def _extract_text(response) -> str:
 
 def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
     """
-    Natively uploads voice notes or relies on typed notes.
-    Uses Gemini to handle transcription and translation cleanly in one step.
+    Natively uploads voice notes (the ASHA-patient conversation) or relies
+    on typed notes. Uses Gemini to handle transcription and translation
+    cleanly in one step.
     """
     errors = list(state.get("errors", []))
     raw_text = (state.get("raw_text") or "").strip()
@@ -109,14 +111,18 @@ def ingest_node(state: ASHAAgentState) -> Dict[str, Any]:
 
                 transcription_prompt = (
                     "You are an elite clinical transcriptionist tracking rural public health data.\n"
-                    "Convert mixed audio descriptions into explicit, flat, translated clinical facts.\n\n"
+                    "This audio is a conversation between an ASHA (community health worker) and a "
+                    "patient or caregiver. Convert mixed audio descriptions into explicit, flat, "
+                    "translated clinical facts.\n\n"
                     "EXAMPLES:\n"
                     "- Spoken: 'Maternal health report, sister ka hemoglobin level 9.5 hai aur bp bahut high hai, 150 over 95'\n"
                     "  Output: 'Maternal profile case indicator: Patient has a low hemoglobin level tracking at 9.5 g/dL and high blood pressure registering at 150/95 mmHg.'\n"
                     "- Spoken: 'Child vaccination camp done, teen bache mobilized and we distributed 4 ORS packets'\n"
                     "  Output: 'Activity log reporting execution: 3 children mobilized for immunization services, 4 ORS replacement kit pieces consumed.'\n\n"
                     "Maintain raw numerical figures with precise decimals. Convert everything into clinical English. "
-                    "Do not add conversational commentary or summaries; output only the high-accuracy translation."
+                    "If a patient's name, or the child's age/date of birth, is spoken, keep it explicitly in the "
+                    "output text so it is not lost. Do not add conversational commentary or summaries; output "
+                    "only the high-accuracy translation."
                 )
 
                 response = client.models.generate_content(
@@ -175,6 +181,9 @@ def extract_vitals_node(state: ASHAAgentState) -> Dict[str, Any]:
     """
     Uses structured schema parsing to extract medical records, metrics,
     and administrative fields into an expanded unified metadata schema.
+    Also attempts to recover the patient's name and (for children) age in
+    months from the note, as a fallback for when the ASHA worker didn't
+    type it into the form.
     """
     translated_text = state.get("translated_text_en", "")
     errors = list(state.get("errors", []))
@@ -191,16 +200,22 @@ def extract_vitals_node(state: ASHAAgentState) -> Dict[str, Any]:
     2. VITAL_EVENTS — mentions a birth or death event, or child/infant mortality.
     3. DISEASE_SCREENING — mentions communicable disease symptoms (fever, cough, isolation) or NCD screening
        that is NOT tied to a pregnancy (if pregnancy is mentioned too, MATERNAL_HEALTH still wins).
-    4. CHILD_HEALTH — mentions immunization, birth weight, breastfeeding, or a child under a specific age.
+    4. CHILD_HEALTH — mentions immunization, birth weight, breastfeeding, malnutrition, or a child under a
+       specific age.
     5. COMMUNITY_DEMOGRAPHICS — mentions family planning eligibility or malnutrition screening not covered above.
     6. DRUG_SUPPLIES — primarily about medicine/consumable stock or distribution counts.
     7. WORK_LOGS — general activity/outreach logging with no clinical signal above.
 
     Extract every numeric vital sign exactly as stated (blood pressure as separate systolic_bp/diastolic_bp
-    integers, hemoglobin as a decimal number, ages/weeks as integers). Do not invent values that are not
+    integers, hemoglobin as a decimal number, ages/weeks/months as integers). Do not invent values that are not
     present in the note — leave those fields absent instead of guessing. Populate every relevant nested
     object even when primary_domain is a different domain, since a note can carry signals for multiple
     domains at once (e.g. a maternal note can also carry disease_screening symptoms).
+
+    If a patient's given name is stated or clearly implied anywhere in the note, capture it in
+    `patient_name_guess` (leave it absent entirely if no name is mentioned — do not guess a name that
+    isn't there). If the note is about a child and an age is stated (in any unit), convert it to whole
+    months and put it in `child_age_months` (e.g. "2 years old" -> 24, "8 months" -> 8).
     """
 
     response_schema = {
@@ -210,6 +225,7 @@ def extract_vitals_node(state: ASHAAgentState) -> Dict[str, Any]:
                 "type": "STRING",
                 "enum": ["MATERNAL_HEALTH", "CHILD_HEALTH", "VITAL_EVENTS", "DISEASE_SCREENING", "COMMUNITY_DEMOGRAPHICS", "DRUG_SUPPLIES", "WORK_LOGS"]
             },
+            "patient_name_guess": {"type": "STRING"},
             "maternal_health": {
                 "type": "OBJECT",
                 "properties": {
@@ -227,6 +243,7 @@ def extract_vitals_node(state: ASHAAgentState) -> Dict[str, Any]:
                 "type": "OBJECT",
                 "properties": {
                     "has_birth_record": {"type": "BOOLEAN"},
+                    "child_age_months": {"type": "INTEGER"},
                     "immunizations_given": {"type": "ARRAY", "items": {"type": "STRING"}},
                     "birth_weight_kg": {"type": "NUMBER"},
                     "breastfeeding_progress_status": {"type": "STRING", "enum": ["EXCLUSIVE", "PARTIAL", "ISSUES"]}
@@ -312,11 +329,20 @@ def extract_vitals_node(state: ASHAAgentState) -> Dict[str, Any]:
             extracted_data["community_demographics"] = {}
         extracted_data["community_demographics"]["malnourished_child_flag"] = True
 
-    return {
+    result: Dict[str, Any] = {
         "patient_type": extracted_data.get("primary_domain", "WORK_LOGS"),
         "unified_metadata": extracted_data,
         "errors": errors
     }
+
+    # If the ASHA worker didn't type a patient name into the form, fall
+    # back to whatever name (if any) the model could pick out of the note.
+    if not (state.get("patient_name") or "").strip():
+        guessed_name = extracted_data.get("patient_name_guess")
+        if guessed_name:
+            result["patient_name"] = guessed_name
+
+    return result
 
 
 def route_by_patient_type(state: ASHAAgentState) -> str:
@@ -465,16 +491,18 @@ def guidance_generation_node(state: ASHAAgentState) -> Dict[str, Any]:
     level = triage.get("risk_level", "LOW")
     reasons_str = ", ".join(triage.get("reasons", []))
     domain = metadata.get("primary_domain", "GENERAL")
+    patient_name = state.get("patient_name") or "the patient"
 
     prompt = f"""
     You are an AI assistant helping a community health worker (ASHA worker) in rural India.
-    Based on this clinical synthesis across domain '{domain}', generate contextual field guidance.
+    Based on this clinical synthesis across domain '{domain}' for patient '{patient_name}',
+    generate contextual field guidance.
 
     Risk Level: {level}
     Medical Flags: {reasons_str}
 
     Generate instructions in two variations:
-    1. A clear English medical instruction string.
+    1. A clear English medical instruction string, addressed to the ASHA worker, naming the patient.
     2. A matching local language guidance string translated entirely into clear, simple Hindi.
 
     Respond with a JSON object format matching:
@@ -502,3 +530,249 @@ def guidance_generation_node(state: ASHAAgentState) -> Dict[str, Any]:
         "guidance_text_local": guidance_data.get("guidance_text_local"),
         "abha_sync_status": {"synced": True, "transaction_id": f"ABHA-TXN-{int(time.time())}"}
     }
+
+
+def schedule_check_node(state: ASHAAgentState) -> Dict[str, Any]:
+    """
+    Checks the extracted record against a simplified version of India's
+    Universal Immunization Programme (child) and Ministry of Health & Family
+    Welfare ANC guidelines (maternal) to flag what's due, overdue, or already
+    completed. This is a rule-based check (no LLM call) so it stays fast and
+    cheap to run on every single visit.
+    """
+    metadata = state.get("unified_metadata", {}) or {}
+    domain = state.get("patient_type", "WORK_LOGS")
+    errors = list(state.get("errors", []))
+
+    result: Dict[str, Any] = {
+        "domain_checked": domain,
+        "items_due": [],
+        "items_completed": [],
+        "notes": [],
+    }
+
+    if domain == "CHILD_HEALTH":
+        child = metadata.get("child_health_immunization", {}) or {}
+        age_months = child.get("child_age_months")
+        given = [str(v).strip().upper() for v in (child.get("immunizations_given") or [])]
+
+        # Simplified Universal Immunization Programme milestones:
+        # (vaccine label, age in months it becomes due)
+        schedule = [
+            ("BCG", 0), ("OPV-0", 0), ("HEP B-1", 0),
+            ("OPV-1", 1), ("PENTAVALENT-1", 1),
+            ("OPV-2", 2), ("PENTAVALENT-2", 2),
+            ("OPV-3", 3), ("PENTAVALENT-3", 3),
+            ("MEASLES-RUBELLA-1", 9),
+            ("DPT BOOSTER-1", 16), ("MEASLES-RUBELLA-2", 16),
+        ]
+
+        if age_months is None:
+            result["notes"].append(
+                "Child age was not captured in this note, so the vaccine "
+                "schedule could not be checked against age. Ask the caregiver "
+                "for the child's age or date of birth on the next visit."
+            )
+        else:
+            for label, due_month in schedule:
+                already_given = any(label.split("-")[0] in g for g in given)
+                if already_given:
+                    result["items_completed"].append(label)
+                elif age_months >= due_month:
+                    result["items_due"].append(label)
+
+    elif domain == "MATERNAL_HEALTH":
+        maternal = metadata.get("maternal_health", {}) or {}
+        anc_count = maternal.get("anc_checkup_count")
+        gestational_weeks = maternal.get("gestational_age_weeks")
+
+        if anc_count is not None:
+            if anc_count < 4:
+                result["items_due"].append(
+                    f"ANC checkup #{anc_count + 1} (Govt. of India recommends a minimum of 4 ANC visits)"
+                )
+            else:
+                result["items_completed"].append(f"{anc_count} ANC checkups completed")
+        else:
+            result["notes"].append("ANC checkup count was not captured in this note.")
+
+        if gestational_weeks is not None and gestational_weeks >= 20 and (anc_count or 0) < 1:
+            result["notes"].append(
+                "Pregnancy is well advanced but no ANC checkup count was captured — "
+                "verify TT/Td and IFA (iron-folic acid) status directly with the patient."
+            )
+
+    else:
+        result["notes"].append(
+            "Vaccine/ANC schedule check only applies to CHILD_HEALTH and MATERNAL_HEALTH domains."
+        )
+
+    return {"schedule_check_result": result, "errors": errors}
+
+
+def follow_up_scheduling_node(state: ASHAAgentState) -> Dict[str, Any]:
+    """
+    Auto-schedules a follow-up visit date based on the triage risk level,
+    pulled tighter if there's an outstanding vaccine/ANC schedule item.
+    """
+    risk = state.get("risk_assessment") or {}
+    level = risk.get("risk_level", "LOW")
+    schedule_result = state.get("schedule_check_result") or {}
+
+    days_by_level = {
+        "URGENT_REFERRAL": 1,
+        "HIGH": 3,
+        "MODERATE": 7,
+        "LOW": 30,
+    }
+    days = days_by_level.get(level, 30)
+
+    if schedule_result.get("items_due"):
+        days = min(days, 7)
+
+    follow_up_date = (datetime.date.today() + datetime.timedelta(days=days)).isoformat()
+
+    reason_parts = [f"Risk level: {level}"]
+    if schedule_result.get("items_due"):
+        reason_parts.append(f"{len(schedule_result['items_due'])} schedule item(s) due")
+
+    return {
+        "follow_up_plan": {
+            "follow_up_date": follow_up_date,
+            "days_from_today": days,
+            "reason": "; ".join(reason_parts),
+        }
+    }
+
+
+def sms_reminder_node(state: ASHAAgentState) -> Dict[str, Any]:
+    """
+    Prepares (and, in this reference build, simulates sending) an SMS
+    reminder about the scheduled follow-up.
+
+    This is intentionally a stub: no SMS gateway credentials or phone
+    number field exist in this app yet. Wiring up a real gateway only
+    requires replacing the body of the `try` block below — everything
+    else in the pipeline (follow_up_plan, patient_name, village) is
+    already assembled and ready to hand to a real client.
+    """
+    plan = state.get("follow_up_plan") or {}
+    patient_name = state.get("patient_name") or "the patient"
+    village = state.get("village", "")
+    follow_up_date = plan.get("follow_up_date", "the scheduled date")
+
+    message = (
+        f"Reminder: Follow-up visit for {patient_name} ({village}) is scheduled on "
+        f"{follow_up_date}. An ASHA worker will visit, or please attend the sub-center."
+    )
+
+    try:
+        # TODO: integrate a real SMS gateway here, e.g.:
+        #   sms_client.send(to=household_phone_number, body=message)
+        # For this reference build we simulate a successful send so the
+        # rest of the pipeline and UI can be wired up end-to-end.
+        status = {
+            "status": "SIMULATED_SENT",
+            "message": message,
+            "note": "No SMS gateway is configured — wire one up in sms_reminder_node to send this for real.",
+        }
+    except Exception as e:
+        status = {"status": "FAILED", "message": message, "error": str(e)}
+
+    return {"sms_reminder_status": status}
+
+
+def report_generation_node(state: ASHAAgentState) -> Dict[str, Any]:
+    """
+    Consolidates the entire visit into one printable/downloadable plain-text
+    report the ASHA worker can keep, print, or paste into a paper register.
+    Also prints it to the server console/log as a durable execution trace.
+    """
+    lines = []
+    lines.append("=" * 60)
+    lines.append("ASHA HOME VISIT — DETAILED HEALTH RECORD")
+    lines.append("=" * 60)
+    lines.append(f"Session ID        : {state.get('session_id')}")
+    lines.append(f"ASHA Worker ID    : {state.get('asha_worker_id')}")
+    lines.append(f"Village/Settlement: {state.get('village')}")
+    lines.append(f"Patient Name      : {state.get('patient_name') or 'Not recorded'}")
+    lines.append(f"Detected Language : {state.get('detected_language')}")
+    lines.append("")
+
+    lines.append("-- Conversation / Note (translated to English) --")
+    lines.append(state.get("translated_text_en") or "N/A")
+    lines.append("")
+
+    metadata = state.get("unified_metadata", {}) or {}
+    lines.append(f"-- Classified Domain: {metadata.get('primary_domain', 'N/A')} --")
+    lines.append("")
+
+    risk = state.get("risk_assessment") or {}
+    lines.append(f"Risk Level: {risk.get('risk_level', 'N/A')}")
+    for reason in risk.get("reasons", []):
+        lines.append(f"  - {reason}")
+    lines.append("")
+
+    muac = state.get("muac_result")
+    if muac:
+        lines.append("-- MUAC / Child Nutrition Check --")
+        lines.append(json.dumps(muac, indent=2, ensure_ascii=False))
+        lines.append("")
+
+    maternal_risk = state.get("maternal_risk_result")
+    if maternal_risk:
+        lines.append("-- Maternal Risk Markers --")
+        lines.append(json.dumps(maternal_risk, indent=2, ensure_ascii=False))
+        lines.append("")
+
+    schedule = state.get("schedule_check_result")
+    if schedule:
+        lines.append("-- Vaccine / ANC Schedule Check --")
+        if schedule.get("items_due"):
+            lines.append("  Due / Overdue:")
+            for item in schedule["items_due"]:
+                lines.append(f"    - {item}")
+        if schedule.get("items_completed"):
+            lines.append("  Completed:")
+            for item in schedule["items_completed"]:
+                lines.append(f"    - {item}")
+        for note in schedule.get("notes", []):
+            lines.append(f"  Note: {note}")
+        lines.append("")
+
+    plan = state.get("follow_up_plan")
+    if plan:
+        lines.append("-- Follow-Up Plan --")
+        lines.append(f"  Next visit date : {plan.get('follow_up_date')}")
+        lines.append(f"  Reason          : {plan.get('reason')}")
+        lines.append("")
+
+    sms = state.get("sms_reminder_status")
+    if sms:
+        lines.append("-- SMS Reminder --")
+        lines.append(f"  Status : {sms.get('status')}")
+        lines.append(f"  Message: {sms.get('message')}")
+        lines.append("")
+
+    lines.append("-- Guidance for ASHA Worker --")
+    lines.append(f"English : {state.get('guidance_text_en')}")
+    lines.append(f"Local   : {state.get('guidance_text_local')}")
+    lines.append("")
+
+    abha = state.get("abha_sync_status")
+    if abha:
+        lines.append(f"ABHA Sync: {abha}")
+        lines.append("")
+
+    if state.get("errors"):
+        lines.append("-- Warnings / Errors During Processing --")
+        for err in state["errors"]:
+            lines.append(f"  - {err}")
+        lines.append("")
+
+    lines.append("=" * 60)
+
+    report_text = "\n".join(lines)
+    print(report_text)  # durable server-side log of every visit
+
+    return {"detailed_report": report_text}
