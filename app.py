@@ -21,7 +21,7 @@ def _clean_api_key(raw_key):
 
 api_key = _clean_api_key(os.environ.get("GEMINI_API_KEY"))
 if not api_key:
-   
+
     try:
         api_key = _clean_api_key(st.secrets.get("GEMINI_API_KEY"))
     except Exception:
@@ -126,7 +126,11 @@ st.markdown("""
 
 
 st.title("ASHTHA FOR ASHA")
-st.caption("Live multimodal capture using unified voice processing, text, and image analysis.")
+st.caption(
+    "Turn every ASHA home visit into a fully automated health record — "
+    "voice-first capture, auto-filled forms, vaccine/ANC schedule checks, "
+    "and an auto-scheduled follow-up. No typing, no paper forms, no delays."
+)
 
 # --- SECTION 1: AUTHENTICATION ---
 st.markdown("### 📋 ASHA Worker Authentication")
@@ -165,7 +169,7 @@ with st.sidebar:
         for rec in records:
             raw_risk = rec.get('risk_assessment')
             risk_level = "—"
-            
+
             # 1. Handle if it's already a native dict/list
             if isinstance(raw_risk, dict):
                 risk_level = raw_risk.get('risk_level', '—')
@@ -173,12 +177,12 @@ with st.sidebar:
                 # If it's a list, look inside the first element if it's a dict
                 first_item = raw_risk[0]
                 risk_level = first_item.get('risk_level', '—') if isinstance(first_item, dict) else '—'
-                
+
             # 2. Handle if it's stored as a JSON string
             elif isinstance(raw_risk, str) and raw_risk.strip():
                 try:
                     parsed_risk = json.loads(raw_risk)
-                    
+
                     if isinstance(parsed_risk, dict):
                         risk_level = parsed_risk.get('risk_level', '—')
                     elif isinstance(parsed_risk, list) and parsed_risk:
@@ -187,15 +191,35 @@ with st.sidebar:
                         risk_level = first_item.get('risk_level', '—') if isinstance(first_item, dict) else '—'
                 except json.JSONDecodeError:
                     risk_level = "—"
-            
+
             # 3. Render output cleanly
-            st.write(f"**{rec.get('abha_ref', 'N/A')}** · {rec.get('patient_type', 'Unknown')} · {risk_level}")
+            patient_name = rec.get('patient_name', 'Unknown')
+            follow_up = rec.get('follow_up_date')
+            follow_up_str = f" · next visit {follow_up}" if follow_up else ""
+            st.write(
+                f"**{rec.get('abha_ref', 'N/A')}** · {patient_name} · "
+                f"{rec.get('patient_type', 'Unknown')} · {risk_level}{follow_up_str}"
+            )
     else:
         st.caption("No historical records fetched for this session.")
-        
+
 # --- SECTION 2: PATIENT CASE ENCOUNTER DATA ENTRY ---
 st.markdown("### 📝 Patient Case Capture")
-mode = st.radio("Input method for case description", ["Type note manually", "Record live voice note"], horizontal=True)
+
+patient_name = st.text_input(
+    "Patient Name",
+    value=st.session_state.get("patient_name", ""),
+    placeholder="e.g. Sunita Devi",
+    key="patient_name_input",
+    help="Whose visit is this? If left blank, the agent will try to pick a name out of the note/recording.",
+)
+patient_name = patient_name.strip()
+
+mode = st.radio(
+    "Input method — records the ASHA–patient conversation",
+    ["Type note manually", "Record live voice note"],
+    horizontal=True,
+)
 
 raw_text = ""
 audio_path = None
@@ -208,7 +232,7 @@ if mode == "Type note manually":
         height=100,
     )
 else:
-    audio_file = st.audio_input("Tap microphone to record patient vocal symptoms")
+    audio_file = st.audio_input("Tap microphone to record the ASHA–patient conversation")
     if audio_file is not None:
         st.session_state["cached_audio_bytes"] = audio_file.read()
 
@@ -233,7 +257,12 @@ if enable_camera:
         muac_image_path = stable_img_path
 
 # --- SECTION 3: PIPELINE INVOCATION AND RESPONSE VISUALIZATION ---
-button_disabled = not worker_id or not village
+# Patient name is required — every saved record needs to be attributable
+# to a specific patient, not just an ASHA worker/village pair.
+button_disabled = not worker_id or not village or not patient_name
+
+if not patient_name and worker_id and village:
+    st.info("ℹ️ Enter the patient's name above to enable the workflow.")
 
 # Trim whitespace-only notes so they don't slip past the "blank data" check below.
 raw_text_stripped = raw_text.strip() if raw_text else ""
@@ -246,6 +275,7 @@ if st.button("Analyze & Run Agent Workflow", type="primary", use_container_width
             "session_id": str(uuid.uuid4()),
             "asha_worker_id": worker_id,
             "village": village,
+            "patient_name": patient_name,
             "input_mode": "audio" if (mode == "Record live voice note" and audio_path) else "text",
             "raw_text": raw_text_stripped,
             "raw_audio_path": audio_path,
@@ -260,13 +290,18 @@ if st.button("Analyze & Run Agent Workflow", type="primary", use_container_width
                 st.error(f"Agent workflow failed to complete: {str(e)}")
                 final_state = None
 
+            generated_abha_ref = None
             if final_state and "risk_assessment" in final_state and "patient_type" in final_state:
+                generated_abha_ref = f"ABHA-{str(uuid.uuid4())[:8].upper()}"
                 try:
                     db.save_record(
-                        f"ABHA-{str(uuid.uuid4())[:8].upper()}",
+                        generated_abha_ref,
+                        final_state.get("patient_name"),
                         final_state["patient_type"],
-                        json.dumps(final_state["risk_assessment"]) if isinstance(final_state["risk_assessment"], dict) else final_state["risk_assessment"]
+                        final_state["risk_assessment"],
+                        (final_state.get("follow_up_plan") or {}).get("follow_up_date"),
                     )
+                    final_state["abha_ref"] = generated_abha_ref
                 except Exception as e:
                     st.warning(f"Record processed but could not be saved to history: {str(e)}")
 
@@ -276,7 +311,8 @@ if st.button("Analyze & Run Agent Workflow", type="primary", use_container_width
 # Render output cards dynamically
 result = st.session_state.get("last_result")
 if result:
-    st.success("Triage Evaluation Complete.")
+    display_name = result.get("patient_name") or "the patient"
+    st.success(f"Triage Evaluation Complete for {display_name}.")
 
     risk = result.get("risk_assessment", {})
     level = risk.get("risk_level", "LOW")
@@ -293,6 +329,31 @@ if result:
     with tab_local:
         st.info(result.get("guidance_text_local", "कोई निर्देश उपलब्ध नहीं है।"))
 
+    # --- Vaccine / ANC Schedule Check ---
+    schedule_result = result.get("schedule_check_result")
+    if schedule_result:
+        st.subheader("💉 Vaccine / ANC Schedule Check")
+        if schedule_result.get("items_due"):
+            st.warning("**Due / Overdue:** " + ", ".join(schedule_result["items_due"]))
+        if schedule_result.get("items_completed"):
+            st.caption("Completed: " + ", ".join(schedule_result["items_completed"]))
+        for note in schedule_result.get("notes", []):
+            st.caption(f"ℹ️ {note}")
+
+    # --- Follow-Up + SMS Reminder ---
+    plan = result.get("follow_up_plan")
+    sms = result.get("sms_reminder_status")
+    if plan or sms:
+        st.subheader("📅 Follow-Up & Reminder")
+        if plan:
+            st.write(f"**Next visit auto-scheduled:** {plan.get('follow_up_date')}  ({plan.get('reason')})")
+        if sms:
+            sms_status = sms.get("status")
+            if sms_status == "SIMULATED_SENT":
+                st.caption(f"📱 SMS reminder prepared (simulated — no gateway configured): {sms.get('message')}")
+            else:
+                st.caption(f"📱 SMS reminder status: {sms_status}")
+
     if result.get("muac_result"):
         with st.expander("🔍 Diagnostics: MUAC Image Verification Metrics"):
             st.json(result["muac_result"])
@@ -304,6 +365,8 @@ if result:
     with st.expander("🗂️ Unified Patient Metadata (ABHA System Output Payload)"):
         metadata_payload = {
             "administrative_metadata": {
+                "abha_ref": result.get("abha_ref"),
+                "patient_name": result.get("patient_name"),
                 "managed_by_worker": result.get("asha_worker_id"),
                 "registered_village": result.get("village"),
                 "detected_language": result.get("detected_language"),
@@ -313,6 +376,19 @@ if result:
             "extracted_multi_domain_records": result.get("unified_metadata", {})
         }
         st.json(metadata_payload)
+
+    # --- Detailed, printable/downloadable report ---
+    if result.get("detailed_report"):
+        st.subheader("🖨️ Detailed Visit Report")
+        st.text_area("Report Preview", result["detailed_report"], height=280, key="report_preview")
+        safe_name = (result.get("patient_name") or "patient").replace(" ", "_")
+        st.download_button(
+            label="⬇️ Download Detailed Report (.txt)",
+            data=result["detailed_report"],
+            file_name=f"ASHA_report_{safe_name}_{result.get('abha_ref', 'record')}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
 
     if result.get("errors"):
         with st.expander("⚠️ Backend Execution Warning Logs"):
