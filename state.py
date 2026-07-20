@@ -7,6 +7,7 @@ class ASHAAgentState(TypedDict):
     session_id: str
     asha_worker_id: str
     village: str
+    patient_name: Optional[str]
     input_mode: str  # "text" or "audio"
 
     # Raw Inputs
@@ -18,15 +19,7 @@ class ASHAAgentState(TypedDict):
     detected_language: Optional[str]
     translated_text_en: Optional[str]
 
-    # Structured Medical Extractions
-    # NOTE: "unified_metadata" is the exact key extract_vitals_node returns
-    # (see nodes.py) and the exact key muac_analysis_node, maternal_risk_node,
-    # triage_node, and app.py all read back via state.get("unified_metadata").
-    # This schema previously declared "patient_record"/"extracted_vitals"
-    # instead, which no node ever wrote to — so the real data extract_vitals_node
-    # produced was silently dropped by LangGraph on every state merge (LangGraph
-    # only persists keys declared in this TypedDict). That was the root cause of
-    # "extracted_multi_domain_records" always rendering as an empty {}.
+
     patient_type: Optional[str]  # one of the primary_domain enum values from nodes.py,
                                   # e.g. "MATERNAL_HEALTH", "CHILD_HEALTH", "WORK_LOGS", etc.
     unified_metadata: Optional[Dict[str, Any]]
@@ -40,6 +33,17 @@ class ASHAAgentState(TypedDict):
     guidance_text_en: Optional[str]
     guidance_text_local: Optional[str]
 
+    # Vaccine / ANC schedule compliance check (rule-based, runs after triage)
+    schedule_check_result: Optional[Dict[str, Any]]
+
+    # Follow-up automation
+    follow_up_plan: Optional[Dict[str, Any]]
+    sms_reminder_status: Optional[Dict[str, Any]]
+
+    # Consolidated human-readable report (printed + downloadable)
+    detailed_report: Optional[str]
+
     # Synchronization tracking
     abha_sync_status: Optional[Dict[str, Any]]
+
     errors: List[str]
