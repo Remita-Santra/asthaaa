@@ -1,5 +1,4 @@
 from langgraph.graph import StateGraph, START, END
-
 from state import ASHAAgentState
 import nodes
 
@@ -14,6 +13,10 @@ def build_graph():
     graph.add_node("maternal_risk", nodes.maternal_risk_node)
     graph.add_node("triage", nodes.triage_node)
     graph.add_node("guidance_generation", nodes.guidance_generation_node)
+    graph.add_node("schedule_check", nodes.schedule_check_node)
+    graph.add_node("follow_up_scheduling", nodes.follow_up_scheduling_node)
+    graph.add_node("sms_reminder", nodes.sms_reminder_node)
+    graph.add_node("report_generation", nodes.report_generation_node)
 
     graph.add_edge(START, "ingest")
     graph.add_edge("ingest", "language_and_translate")
@@ -34,9 +37,16 @@ def build_graph():
     # combined with the domain-specific result into one risk_assessment.
     graph.add_edge("muac_analysis", "triage")
     graph.add_edge("maternal_risk", "triage")
-
     graph.add_edge("triage", "guidance_generation")
-    graph.add_edge("guidance_generation", END)
+
+    # Automation tail: vaccine/ANC schedule check -> auto-scheduled
+    # follow-up date -> simulated SMS reminder -> consolidated,
+    # printable/downloadable detailed report.
+    graph.add_edge("guidance_generation", "schedule_check")
+    graph.add_edge("schedule_check", "follow_up_scheduling")
+    graph.add_edge("follow_up_scheduling", "sms_reminder")
+    graph.add_edge("sms_reminder", "report_generation")
+    graph.add_edge("report_generation", END)
 
     return graph.compile()
 
